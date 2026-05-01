@@ -1,0 +1,27 @@
+# ROS 2 / colcon generated files
+build/
+install/
+log/
+
+# Python environments and caches
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Recorded datasets and runtime outputs
+dataset/
+*.bag
+*.db3
+*.mcap
+
+# Local editor / tool state
+.vscode/
+.idea/
+.codex
+
+# OS files
+.DS_Store
+Thumbs.db
+src/scripts/
