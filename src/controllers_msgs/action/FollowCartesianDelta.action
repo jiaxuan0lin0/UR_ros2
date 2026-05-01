@@ -1,0 +1,23 @@
+# Goal
+#
+# Each point is one [dx, dy, dz, droll, dpitch, dyaw, gripper] sample.
+
+controllers_msgs/CartesianDeltaPoint[] points
+string command_frame
+float64 gripper_velocity
+float64 gripper_effort
+bool wait_for_gripper
+float64 gripper_position_tolerance
+float64 gripper_timeout
+float64 gripper_settle_time
+---
+bool success
+string message
+geometry_msgs/PoseStamped final_tcp_pose
+sensor_msgs/JointState final_gripper_state
+---
+uint32 current_point_index
+uint32 total_points
+geometry_msgs/PoseStamped tcp_pose
+sensor_msgs/JointState gripper_state
+string message

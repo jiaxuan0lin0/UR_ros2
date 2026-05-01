@@ -1,11 +1,11 @@
+from collections import deque
 import time
 
+from controllers.dh_gripper import dh_modbus_gripper
 import rclpy
 from rclpy.node import Node
-from collections import deque
 from sensor_msgs.msg import JointState
 from trajectory_msgs.msg import JointTrajectory
-from controllers.dh_gripper import dh_modbus_gripper
 
 
 class Gripper(Node):
@@ -24,9 +24,13 @@ class Gripper(Node):
 
         self.declare_parameter('port', '/tmp/ttyUR')
         self.declare_parameter('baudrate', 115200)
+        self.declare_parameter('max_queue_points', 500)
 
         self.port = self.get_parameter('port').value
         self.baudrate = self.get_parameter('baudrate').value
+        self.max_queue_points = int(
+            self.get_parameter('max_queue_points').value
+        )
 
         self.gripper = dh_modbus_gripper.dh_modbus_gripper()
         self.gripper_ready = False
@@ -38,7 +42,7 @@ class Gripper(Node):
             self.RECONNECT_INTERVAL_SEC,
             self.ensure_gripper_ready,
         )
-        
+
         self.joint_state_pub = self.create_publisher(
             JointState,
             '/gripper_joint_states',
@@ -112,7 +116,7 @@ class Gripper(Node):
 
         return clamped_value
 
-    def publish_joint_state(self): 
+    def publish_joint_state(self):
         if not self.gripper_ready:
             return
 
@@ -129,7 +133,7 @@ class Gripper(Node):
         if current_force is None:
             self.handle_gripper_disconnect('failed to read gripper force')
             return
-        
+
         msg = JointState()
         msg.header.stamp = self.get_clock().now().to_msg()
         msg.name = ['gripper_joint']
@@ -144,12 +148,17 @@ class Gripper(Node):
             self.get_logger().warn('gripper not ready, ignore trajectory')
             return
 
-        if self.active_command is not None or self.command_queue:
-            self.get_logger().warn('gripper is busy, ignore new trajectory')
-            return
-
         if not msg.points:
             self.get_logger().warn('received empty trajectory')
+            return
+
+        pending_points = len(self.command_queue)
+        if self.active_command is not None:
+            pending_points += 1
+        if pending_points + len(msg.points) > self.max_queue_points:
+            self.get_logger().warn(
+                'gripper queue is full, ignore new trajectory'
+            )
             return
 
         for point in msg.points:
@@ -158,15 +167,32 @@ class Gripper(Node):
             raw_effort = point.effort[0] if point.effort else 100.0
 
             command = {
-                'position': self.clamp_command(raw_position, self.MIN_POSITION, self.MAX_POSITION, 'position'),
-                'velocity': self.clamp_command(raw_velocity, self.MIN_SPEED, self.MAX_SPEED, 'velocity'),
-                'effort': self.clamp_command(raw_effort, self.MIN_FORCE, self.MAX_FORCE, 'effort'),
+                'position': self.clamp_command(
+                    raw_position,
+                    self.MIN_POSITION,
+                    self.MAX_POSITION,
+                    'position',
+                ),
+                'velocity': self.clamp_command(
+                    raw_velocity,
+                    self.MIN_SPEED,
+                    self.MAX_SPEED,
+                    'velocity',
+                ),
+                'effort': self.clamp_command(
+                    raw_effort,
+                    self.MIN_FORCE,
+                    self.MAX_FORCE,
+                    'effort',
+                ),
             }
             self.command_queue.append(command)
 
-        self.get_logger().info(f'queued {len(self.command_queue)} trajectory points')
+        self.get_logger().info(
+            f'queued {len(msg.points)} trajectory points, '
+            f'pending={len(self.command_queue)}'
+        )
 
-        
     def execute_step(self):
         if not self.gripper_ready:
             return
@@ -174,7 +200,7 @@ class Gripper(Node):
         if self.active_command is None:
             if not self.command_queue:
                 return
-            
+
             self.active_command = self.command_queue.popleft()
             try:
                 self.gripper.SetTargetForce(self.active_command['effort'])
@@ -200,6 +226,7 @@ class Gripper(Node):
         if gripper_state in (1, 2, 3):
             self.get_logger().info(f'gripper motion finished, state={gripper_state}')
             self.active_command = None
+
 
 def main(args=None):
     rclpy.init(args=args)

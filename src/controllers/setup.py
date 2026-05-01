@@ -28,6 +28,11 @@ setup(
     entry_points={
         'console_scripts': [
             'gripper = controllers.gripper:main',
+            (
+                'ur_cartesian_delta_control = '
+                'controllers.ur_cartesian_delta_control:main'
+            ),
+            'ur_joint_control = controllers.ur_joint_control:main',
         ],
     },
 )

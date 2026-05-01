@@ -1,0 +1,27 @@
+终端 1：启动 UR driver
+
+ros2 launch ur_robot_driver ur_control.launch.py \
+  ur_type:=ur7e \
+  robot_ip:=192.168.1.102 \
+  launch_rviz:=false \
+  headless_mode:=true \
+  use_tool_communication:=true \
+  tool_device_name:=/tmp/ttyUR \
+  tool_baud_rate:=115200 \
+  tool_parity:=0 \
+  tool_stop_bits:=1 \
+  tool_rx_idle_chars:=1.5 \
+  tool_tx_idle_chars:=3.5 \
+  tool_voltage:=24 \
+  initial_joint_controller:=forward_position_controller
+
+
+
+终端 2：启动 MoveIt Servo
+
+source /home/ustc/UR/install/setup.bash
+
+ros2 launch ur_moveit_config ur_moveit.launch.py \
+  ur_type:=ur7e \
+  launch_servo:=true \
+  launch_rviz:=false

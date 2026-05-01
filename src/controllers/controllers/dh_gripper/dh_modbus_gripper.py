@@ -22,7 +22,7 @@ class dh_modbus_gripper(object):
                     wCRCWord >>= 1
         return wCRCWord
 
-    def open(self, PortName, BaudRate):
+    def open(self, PortName, BaudRate):  # noqa: A003
         ret = 0
         ret = m_device.connect_device(PortName, BaudRate)
         if ret < 0:
@@ -131,4 +131,3 @@ class dh_modbus_gripper(object):
 
     def GetGripState(self):
         return self.ReadRegisterFunc(0x0201)
-

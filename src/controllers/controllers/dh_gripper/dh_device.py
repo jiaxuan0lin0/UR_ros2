@@ -51,4 +51,3 @@ class dh_device(object):
             return responseData
         else:
             return -1
-
