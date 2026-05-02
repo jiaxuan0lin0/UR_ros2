@@ -137,20 +137,20 @@ source /home/ustc/UR/install/setup.bash
 python3 src/teleop/teleop.py \
   --robot-ip 192.168.1.102 \
   --control-mode servo_j \
-  --rate-hz 100 \
-  --max-velocity 0.08 \
+  --rate-hz 300 \
+  --max-velocity 0.15 \
   --max-acceleration 0.15 \
   --lookahead-time 0.12 \
-  --servo-gain 200 \
+  --servo-gain 300 \
   --scale-factor 0.8 \
   --rotation-scale 0.8 \
-  --max-step-translation 0.001 \
+  --max-step-translation 0.002 \
   --max-step-rotation 0.005 \
   --max-joint-step 0.003 \
   --gripper-port /tmp/ttyUR \
   --state-file /tmp/ur_teleop_state.json \
   --enable-recorder-control \
-  --return-home-max-joint-step 0.0006 \
+  --return-home-max-joint-step 0.003 \
   --return-home-timeout-sec 30
 ```
 
@@ -205,11 +205,11 @@ python3 src/teleop/teleop.py \
 - `--control-mode`：控制模式，默认 `servo_j`。
   - `servo_j`：teleop 先根据目标 TCP 位姿做 IK，再用 `servoJ` 发送关节目标。推荐用于当前采集流程，关节 action 更稳定。
   - `servo_l`：直接用 `servoL` 发送 TCP 位姿目标。TCP 跟随直观，但对轨迹连续性和奇异位姿更敏感。
-- `--rate-hz`：主控制循环频率，默认 `250 Hz`。值越高，轨迹越细，但对网络、Python 调度和 RTDE 稳定性要求越高。调试/采集建议先用 `100 Hz`。
+- `--rate-hz`：主控制循环频率，默认 `250 Hz`。值越高，轨迹越细，但对网络、Python 调度和 RTDE 稳定性要求越高。当前采集样例用 `300 Hz`。
 - `--max-velocity`：传给 UR `servoJ/servoL` 的速度参数，单位按 RTDE 接口定义。它不是最终运动速度上限，实际速度还会被 step 限幅影响。
 - `--max-acceleration`：传给 UR `servoJ/servoL` 的加速度参数，单位按 RTDE 接口定义。
 - `--lookahead-time`：UR servo 的前瞻时间，默认 `0.06 s`。大一些会更平滑、更慢一些；小一些响应更直接，但更容易抖。
-- `--servo-gain`：UR servo 增益，默认 `500`。大一些跟随更紧，小一些更柔和。现在样例用 `200`，适合先把遥操作调稳。
+- `--servo-gain`：UR servo 增益，默认 `500`。大一些跟随更紧，小一些更柔和。当前采集样例用 `300`。
 
 ### XR 输入和映射参数
 
@@ -226,7 +226,7 @@ python3 src/teleop/teleop.py \
 
 ### 安全限幅参数
 
-- `--max-step-translation`：每个控制周期允许 TCP 目标最多平移多少，单位 `m`，默认 `0.01`。这是最直接的速度限制之一。样例 `0.001` 在 `100 Hz` 下理论上约等于 `0.1 m/s` 的目标变化上限。
+- `--max-step-translation`：每个控制周期允许 TCP 目标最多平移多少，单位 `m`，默认 `0.01`。这是最直接的速度限制之一。样例 `0.002` 在 `300 Hz` 下理论上约等于 `0.6 m/s` 的目标变化上限，实际还会受 `--max-joint-step` 和 UR servo 参数限制。
 - `--max-step-rotation`：每个控制周期允许 TCP 目标最多旋转多少，单位 `rad`，默认 `0.05`。如果感觉末端翻转太快，优先降低它或降低 `--rotation-scale`。
 - `--max-joint-step`：每个控制周期允许单个关节目标最多变化多少，单位 `rad`，默认 `0.04`。这是 `servo_j` 下限制关节跳变的关键参数。样例 `0.003` 比较保守。
 - `--workspace-min x,y,z`：可选 TCP 工作空间下边界，单位 `m`，例如 `--workspace-min -0.5,-0.7,0.05`。
@@ -267,7 +267,7 @@ python3 src/teleop/teleop.py \
 
 - `--disable-return-home-before-stop`：关闭 stop 前自动回位。开启后，按 `B` 会直接请求 `/recorder/stop`。
 - `--return-home-joints q1,q2,q3,q4,q5,q6`：`B` 键 stop 前自动回到的 joint-space home 位姿，单位 `rad`。不传则使用代码里的默认采集结束位。
-- `--return-home-max-joint-step`：自动回位时每个控制周期允许单个关节最多变化多少，单位 `rad`，默认 `0.0006`。它只影响 B 键回 home，不影响正常遥操作的 `--max-joint-step`。
+- `--return-home-max-joint-step`：自动回位时每个控制周期允许单个关节最多变化多少，单位 `rad`，默认 `0.0006`。它只影响 B 键回 home，不影响正常遥操作的 `--max-joint-step`。当前采集样例用 `0.003`，和正常遥操作的 `--max-joint-step` 一致。
 - `--return-home-tolerance`：到位判断的最大关节误差，单位 `rad`，默认 `0.01`。
 - `--return-home-timeout-sec`：回位最长等待时间，默认 `20 s`。如果把 `--return-home-max-joint-step` 调得很小，建议设到 `30 s` 或更高；超时也会请求 recorder stop。
 - `--return-home-hold-sec`：到位后保持多久再 stop recorder，默认 `0.3 s`。这段保持也会继续被 recorder 记录。
@@ -286,20 +286,20 @@ source /home/ustc/UR/install/setup.bash
 python3 src/teleop/teleop.py \
   --robot-ip 192.168.1.102 \
   --control-mode servo_j \
-  --rate-hz 100 \
-  --max-velocity 0.08 \
+  --rate-hz 300 \
+  --max-velocity 0.15 \
   --max-acceleration 0.15 \
   --lookahead-time 0.12 \
-  --servo-gain 200 \
+  --servo-gain 300 \
   --scale-factor 0.8 \
   --rotation-scale 0.8 \
-  --max-step-translation 0.001 \
+  --max-step-translation 0.002 \
   --max-step-rotation 0.005 \
   --max-joint-step 0.003 \
   --gripper-port /tmp/ttyUR \
   --state-file /tmp/ur_teleop_state.json \
   --enable-recorder-control \
-  --return-home-max-joint-step 0.0006 \
+  --return-home-max-joint-step 0.003 \
   --return-home-timeout-sec 30
 ```
 
@@ -309,20 +309,20 @@ python3 src/teleop/teleop.py \
 python3 src/teleop/teleop.py \
   --robot-ip 192.168.1.102 \
   --control-mode servo_j \
-  --rate-hz 100 \
-  --max-velocity 0.08 \
+  --rate-hz 300 \
+  --max-velocity 0.15 \
   --max-acceleration 0.15 \
   --lookahead-time 0.12 \
-  --servo-gain 200 \
+  --servo-gain 300 \
   --scale-factor 0.8 \
   --rotation-scale 0 \
-  --max-step-translation 0.001 \
+  --max-step-translation 0.002 \
   --max-step-rotation 0.005 \
   --max-joint-step 0.003 \
   --gripper-port /tmp/ttyUR \
   --state-file /tmp/ur_teleop_state.json \
   --enable-recorder-control \
-  --return-home-max-joint-step 0.0006 \
+  --return-home-max-joint-step 0.003 \
   --return-home-timeout-sec 30
 ```
 

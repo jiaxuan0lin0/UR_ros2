@@ -40,6 +40,7 @@ source /home/ustc/UR/install/setup.bash
 ros2 launch recorder record.launch.py \
   robot_ip:=192.168.1.102 \
   dataset_root:=/home/ustc/UR/dataset \
+  color_fps:=30 \
   teleop_state_file:=/tmp/ur_teleop_state.json \
   python_executable:=/home/ustc/UR/.venv/bin/python3
 ```
@@ -71,7 +72,7 @@ ros2 service call /recorder/discard std_srvs/srv/Trigger {}
 - `dataset_root`：episode 保存目录，默认 `/home/ustc/UR/dataset`。
 - `color_width`：相机彩色图宽度，默认 `640`。
 - `color_height`：相机彩色图高度，默认 `480`。
-- `color_fps`：相机 FPS，默认 `30`。
+- `color_fps`：相机 FPS，默认 `30`。两台 RealSense 建议分别插到不同 USB 控制器/总线上。
 - `teleop_state_file`：teleop action 状态文件，默认 `/tmp/ur_teleop_state.json`。
 - `teleop_state_timeout_sec`：状态文件最大允许年龄，默认 `1.0` 秒。
 - `python_executable`：运行 recorder 的 Python，默认使用当前 `VIRTUAL_ENV` 下的 python3，否则 `/usr/bin/python3`。本机推荐显式传 `/home/ustc/UR/.venv/bin/python3`，因为 `rtde_receive` 装在这个虚拟环境里。
@@ -92,7 +93,7 @@ dataset/
     robot_states.json
 ```
 
-只有调用 `/recorder/save` 后 episode 才会保留；调用 `/recorder/discard` 会删除当前 episode。
+只有调用 `/recorder/save` 后非空 episode 才会保留；空 episode 会在 save 时自动删除。调用 `/recorder/discard` 会删除当前 episode。
 
 ## 数据格式
 
@@ -157,6 +158,8 @@ python -c "import rclpy, rtde_receive, pyrealsense2; print('recorder deps ok')"
 ## 常见问题
 
 录不到数据：确认 teleop 正在运行，并且 `/tmp/ur_teleop_state.json` 在持续更新。
+
+一直提示 `missing target_joint_positions or target_tcp_pose`：teleop state file 还没有有效 action。确认 Quest 客户端已开启 `Tracking - Controller` 和 `Tracking - Data & Control - Send`，并且录制时按住右手 `grip` 让机械臂进入遥操作；`/tmp/ur_teleop_state.json` 里应出现 `target_q` 和 `target_tcp_pose`。
 
 一直提示 skipping sample：通常是没有按住 grip 产生有效 action，或者 teleop state file 已过期。
 

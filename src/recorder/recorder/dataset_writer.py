@@ -29,6 +29,7 @@ class DatasetWriter:
         self.sample_queue = queue.Queue(maxsize=max_queue_size)
         self._sentinel = object()
         self._closed = False
+        self._saved = False
         self._worker = threading.Thread(target=self._worker_loop, daemon=True)
         self._worker.start()
 
@@ -80,22 +81,26 @@ class DatasetWriter:
         self.sample_queue.join()
 
     def _write_state_file(self):
+        self.episode_dir.mkdir(parents=True, exist_ok=True)
         state_file = self.episode_dir / STATE_FILE_NAME
         with open(state_file, "w") as f:
             json.dump(self.records, f, indent=4)
 
-    def close(self, save: bool = True):
+    def close(self, save: bool = True) -> bool:
         if self._closed:
-            return
+            return self._saved
 
         self._closed = True
         self.sample_queue.put(self._sentinel)
         self._worker.join()
 
-        if save:
+        if save and self.records:
             self._write_state_file()
+            self._saved = True
         else:
             shutil.rmtree(self.episode_dir, ignore_errors=True)
+            self._saved = False
+        return self._saved
 
     @property
     def closed(self) -> bool:

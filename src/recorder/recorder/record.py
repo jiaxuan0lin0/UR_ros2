@@ -161,9 +161,16 @@ class RecorderNode(Node):
             self.dataset_writer = None
             self.state = self.IDLE
 
-        dataset_writer.close(save=True)
-        response.success = True
-        response.message = f"Saved episode: {dataset_writer.episode_dir}"
+        saved = dataset_writer.close(save=True)
+        if saved:
+            response.success = True
+            response.message = f"Saved episode: {dataset_writer.episode_dir}"
+        else:
+            response.success = False
+            response.message = (
+                "No samples recorded; discarded empty episode: "
+                f"{dataset_writer.episode_dir}"
+            )
         self.get_logger().info(response.message)
         return response
 
