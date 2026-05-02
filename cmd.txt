@@ -1,0 +1,24 @@
+cd /home/ustc/UR
+source /home/ustc/anaconda3/etc/profile.d/conda.sh
+conda activate XRobo
+source /opt/ros/jazzy/setup.bash
+source /home/ustc/UR/install/setup.bash
+
+python3 src/teleop/teleop.py \
+  --robot-ip 192.168.1.102 \
+  --control-mode servo_j \
+  --rate-hz 300 \
+  --max-velocity 0.01 \
+  --max-acceleration 0.15 \
+  --lookahead-time 0.12 \
+  --servo-gain 300 \
+  --scale-factor 0.8 \
+  --rotation-scale 0.8 \
+  --max-step-translation 0.001 \
+  --max-step-rotation 0.005 \
+  --max-joint-step 0.003 \
+  --gripper-port /tmp/ttyUR \
+  --state-file /tmp/ur_teleop_state.json \
+  --enable-recorder-control \
+  --return-home-max-joint-step 0.0006 \
+  --return-home-timeout-sec 30

@@ -8,6 +8,8 @@ DATASET_ROOT = Path.home() / "UR" / "dataset"
 GRIPPER_OUTPUT_REGISTER = 12
 GRIPPER_RAW_MIN = 0
 GRIPPER_RAW_MAX = 1000
+TELEOP_STATE_FILE = "/tmp/ur_teleop_state.json"
+TELEOP_STATE_TIMEOUT_SEC = 1.0
 
 DEFAULT_RTDE_FREQUENCY = -1.0  # use the robot's default frequency
 

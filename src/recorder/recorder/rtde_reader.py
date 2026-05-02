@@ -23,11 +23,13 @@ class RTDEReader:
             raise RuntimeError("RTDE is not connected")
 
         joint_positions = self.rtde_r.getActualQ()
+        tcp_pose = self.rtde_r.getActualTCPPose()
         raw_gripper = self.rtde_r.getOutputDoubleRegister(GRIPPER_OUTPUT_REGISTER)
         gripper_position = raw_to_norm(raw_gripper)
 
         return {
             "joint_positions": joint_positions,
+            "tcp_pose": tcp_pose,
             "gripper_raw": raw_gripper,
             "gripper_position": gripper_position,
         }

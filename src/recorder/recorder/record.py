@@ -15,10 +15,13 @@ from recorder.config import (
     COLOR_WIDTH,
     DATASET_ROOT,
     DEFAULT_RTDE_FREQUENCY,
+    TELEOP_STATE_FILE,
+    TELEOP_STATE_TIMEOUT_SEC,
     UR_IP,
 )
 from recorder.dataset_writer import DatasetWriter
 from recorder.rtde_reader import RTDEReader
+from recorder.teleop_state_reader import TeleopStateReader
 
 
 class RecorderNode(Node):
@@ -35,6 +38,8 @@ class RecorderNode(Node):
         self.declare_parameter("color_width", COLOR_WIDTH)
         self.declare_parameter("color_height", COLOR_HEIGHT)
         self.declare_parameter("color_fps", COLOR_FPS)
+        self.declare_parameter("teleop_state_file", TELEOP_STATE_FILE)
+        self.declare_parameter("teleop_state_timeout_sec", TELEOP_STATE_TIMEOUT_SEC)
 
         robot_ip = str(self.get_parameter("robot_ip").value)
         rtde_frequency = float(self.get_parameter("rtde_frequency").value)
@@ -42,6 +47,10 @@ class RecorderNode(Node):
         color_width = int(self.get_parameter("color_width").value)
         color_height = int(self.get_parameter("color_height").value)
         color_fps = int(self.get_parameter("color_fps").value)
+        teleop_state_file = str(self.get_parameter("teleop_state_file").value)
+        teleop_state_timeout_sec = float(
+            self.get_parameter("teleop_state_timeout_sec").value
+        )
 
         self.camera_manager = CameraManager(
             color_width=color_width,
@@ -49,6 +58,10 @@ class RecorderNode(Node):
             color_fps=color_fps,
         )
         self.rtde_reader = RTDEReader(robot_ip=robot_ip, frequency=rtde_frequency)
+        self.teleop_state_reader = TeleopStateReader(
+            state_file=teleop_state_file,
+            timeout_sec=teleop_state_timeout_sec,
+        )
 
         self.state = self.IDLE
         self.frame_idx = 0
@@ -56,6 +69,7 @@ class RecorderNode(Node):
         self.state_lock = threading.Lock()
         self.stop_event = threading.Event()
         self.record_thread = threading.Thread(target=self._record_loop, daemon=True)
+        self._last_action_skip_log_time = 0.0
 
         self.start_service = self.create_service(
             Trigger,
@@ -184,6 +198,12 @@ class RecorderNode(Node):
                 continue
 
             try:
+                teleop_state = self.teleop_state_reader.read_state()
+                if not self._has_fresh_action(teleop_state):
+                    self._warn_skipped_action(teleop_state)
+                    time.sleep(0.005)
+                    continue
+
                 frames_dict = self.camera_manager.get_frames()
                 timestamp = time.time()
                 robot_state = self.rtde_reader.read_state()
@@ -197,14 +217,130 @@ class RecorderNode(Node):
                     continue
 
                 frame_idx = self.frame_idx
+
+            record = self._build_record(
+                frame_idx=frame_idx,
+                timestamp=timestamp,
+                robot_state=robot_state,
+                teleop_state=teleop_state,
+            )
+            if record is None:
+                self.get_logger().warn("Skipping malformed recorder sample.")
+                continue
+
+            with self.state_lock:
+                if (
+                    self.state != self.RECORDING
+                    or self.dataset_writer is not dataset_writer
+                    or self.frame_idx != frame_idx
+                ):
+                    continue
                 self.frame_idx += 1
 
-            record = {
-                "frame_idx": frame_idx,
-                "timestamp": timestamp,
-                **robot_state,
-            }
             dataset_writer.enqueue_sample(frame_idx, frames_dict, record)
+
+    @staticmethod
+    def _vector(value, expected_len: int):
+        if value is None:
+            return None
+        try:
+            vector = [float(item) for item in value]
+        except (TypeError, ValueError):
+            return None
+        if len(vector) != expected_len:
+            return None
+        return vector
+
+    @staticmethod
+    def _number(value):
+        if value is None:
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    @classmethod
+    def _has_fresh_action(cls, teleop_state: dict) -> bool:
+        if not teleop_state.get("available") or not teleop_state.get("fresh"):
+            return False
+        return (
+            cls._vector(teleop_state.get("target_joint_positions"), 6) is not None
+            and cls._vector(teleop_state.get("target_tcp_pose"), 6) is not None
+        )
+
+    def _warn_skipped_action(self, teleop_state: dict):
+        now = time.monotonic()
+        if now - self._last_action_skip_log_time < 2.0:
+            return
+        self._last_action_skip_log_time = now
+
+        if not teleop_state.get("available"):
+            reason = teleop_state.get("reason", "teleop_state_unavailable")
+        elif not teleop_state.get("fresh"):
+            age_sec = teleop_state.get("age_sec")
+            if age_sec is not None:
+                reason = f"stale teleop state age={age_sec:.3f}s"
+            else:
+                reason = "stale teleop state"
+        else:
+            reason = "missing target_joint_positions or target_tcp_pose"
+        self.get_logger().warn(f"Skipping sample without fresh teleop action: {reason}")
+
+    @classmethod
+    def _build_record(
+        cls,
+        frame_idx: int,
+        timestamp: float,
+        robot_state: dict,
+        teleop_state: dict,
+    ):
+        observation_joint_positions = cls._vector(robot_state.get("joint_positions"), 6)
+        observation_tcp_pose = cls._vector(robot_state.get("tcp_pose"), 6)
+        action_joint_positions = cls._vector(
+            teleop_state.get("target_joint_positions"),
+            6,
+        )
+        action_tcp_pose = cls._vector(teleop_state.get("target_tcp_pose"), 6)
+
+        observation_gripper_position = cls._number(
+            teleop_state.get("gripper_current_position")
+        )
+        if observation_gripper_position is None:
+            observation_gripper_position = cls._number(
+                robot_state.get("gripper_position")
+            )
+
+        action_gripper_position = cls._number(
+            teleop_state.get("gripper_target_position")
+        )
+        if action_gripper_position is None:
+            action_gripper_position = observation_gripper_position
+
+        if (
+            observation_joint_positions is None
+            or observation_tcp_pose is None
+            or observation_gripper_position is None
+            or action_joint_positions is None
+            or action_tcp_pose is None
+            or action_gripper_position is None
+        ):
+            return None
+
+        return {
+            "frame_idx": int(frame_idx),
+            "timestamp": float(timestamp),
+            "observation": {
+                "joint_positions": observation_joint_positions,
+                "tcp_pose": observation_tcp_pose,
+                "gripper_position": observation_gripper_position,
+            },
+            "action": {
+                "joint_positions": action_joint_positions,
+                "tcp_pose": action_tcp_pose,
+                "gripper_position": action_gripper_position,
+            },
+        }
 
     def destroy_node(self):
         self.stop_event.set()
