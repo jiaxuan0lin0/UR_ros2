@@ -6,6 +6,8 @@ python3 src/teleop/teleop.py \
   --max-acceleration 0.15 \
   --lookahead-time 0.06 \
   --servo-gain 500 \
+  --grip-threshold 0.8 \
+  --grip-release-threshold 0.55 \
   --scale-factor 1 \
   --rotation-scale 1 \
   --max-step-translation 0.002 \

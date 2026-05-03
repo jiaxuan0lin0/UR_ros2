@@ -62,6 +62,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--trigger-name", default="right_trigger")
     parser.add_argument("--emergency-button", default="right_axis_click")
     parser.add_argument("--grip-threshold", type=float, default=0.95)
+    parser.add_argument("--grip-release-threshold", type=float, default=None)
     parser.add_argument("--xr-timeout-sec", type=float, default=0.2)
     parser.add_argument("--scale-factor", type=float, default=0.6)
     parser.add_argument("--rotation-scale", type=float, default=1.0)
@@ -116,12 +117,20 @@ def config_from_args(args) -> TeleopConfig:
         lookahead_time=args.lookahead_time,
         servo_gain=args.servo_gain,
     )
+    grip_threshold = min(1.0, max(0.0, float(args.grip_threshold)))
+    if args.grip_release_threshold is None:
+        grip_release_threshold = max(0.0, grip_threshold - 0.15)
+    else:
+        grip_release_threshold = float(args.grip_release_threshold)
+    grip_release_threshold = min(grip_threshold, max(0.0, grip_release_threshold))
+
     xr = XrConfig(
         pose_source=args.pose_source,
         grip_name=args.grip_name,
         trigger_name=args.trigger_name,
         emergency_button=args.emergency_button,
-        grip_threshold=args.grip_threshold,
+        grip_threshold=grip_threshold,
+        grip_release_threshold=grip_release_threshold,
         timeout_sec=args.xr_timeout_sec,
         scale_factor=args.scale_factor,
         rotation_scale=args.rotation_scale,
@@ -249,6 +258,7 @@ class TeleopRunner:
         self.previous_target_tcp = None
         self.previous_target_q = None
         self.enabled = False
+        self._grip_active = False
         self._last_warn_time = 0.0
         self._last_xr_timestamp = None
         self._last_xr_update_wall = time.monotonic()
@@ -281,6 +291,14 @@ class TeleopRunner:
         raw = self._trigger_to_raw(trigger)
         self.gripper.set_target(raw)
         return raw
+
+    def _motion_enabled_by_grip(self, grip_value: float) -> bool:
+        grip = min(1.0, max(0.0, float(grip_value)))
+        if self._grip_active:
+            self._grip_active = grip >= self.config.xr.grip_release_threshold
+        else:
+            self._grip_active = grip >= self.config.xr.grip_threshold
+        return self._grip_active
 
     def _handle_recorder_control(self):
         if self.recorder_control is None:
@@ -372,8 +390,10 @@ class TeleopRunner:
             self.arm.servo_linear(target_tcp)
             return target_tcp, None
 
-        current_q = self.arm.get_current_joints()
-        target_q = self.arm.inverse_kinematics(target_tcp, q_near=current_q)
+        q_near = self.previous_target_q
+        if q_near is None:
+            q_near = self.arm.get_current_joints()
+        target_q = self.arm.inverse_kinematics(target_tcp, q_near=q_near)
         if target_q is None:
             self._warn_throttled("IK failed or RTDE getInverseKinematics is unavailable.")
             return target_tcp, None
@@ -444,6 +464,11 @@ class TeleopRunner:
             f"gripper={self.config.gripper.port if self.gripper else 'disabled'}"
         )
         print("Hold right grip to move. Press right stick click for emergency stop.")
+        print(
+            "Grip enable: "
+            f"start>={self.config.xr.grip_threshold:.2f}, "
+            f"release<{self.config.xr.grip_release_threshold:.2f}"
+        )
         if self.recorder_control is not None:
             print(
                 "Recorder buttons: "
@@ -491,7 +516,7 @@ class TeleopRunner:
                 continue
 
             grip = self.xr.get_value(self.config.xr.grip_name)
-            active = grip >= self.config.xr.grip_threshold
+            active = self._motion_enabled_by_grip(grip)
 
             if not active:
                 self._motion_locked_until_grip_release = False

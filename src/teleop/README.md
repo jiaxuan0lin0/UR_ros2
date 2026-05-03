@@ -219,7 +219,8 @@ python3 src/teleop/teleop.py \
 - `--grip-name`：机械臂运动使能的模拟量，默认 `right_grip`。只有 grip 值超过阈值才移动机械臂。
 - `--trigger-name`：夹爪控制的模拟量，默认 `right_trigger`。松开为张开，越按越夹紧。
 - `--emergency-button`：急停 teleop 的按钮，默认 `right_axis_click`。
-- `--grip-threshold`：运动使能阈值，默认 `0.95`。如果手柄 grip 不容易按满，可以降低到 `0.7` 或 `0.8`。
+- `--grip-threshold`：运动使能按下阈值，默认 `0.95`。如果手柄 grip 不容易按满，可以降低到 `0.7` 或 `0.8`。
+- `--grip-release-threshold`：运动使能释放阈值，默认比 `--grip-threshold` 低 `0.15`。例如 `--grip-threshold 0.8 --grip-release-threshold 0.55` 可以避免 grip 模拟量轻微抖动时反复 `servoStop()`。
 - `--xr-timeout-sec`：XR 数据超时时间，默认 `0.2 s`。超过这个时间没有新数据时，teleop 会停止继续发送运动目标。
 - `--scale-factor`：手柄平移到机器人 TCP 平移的比例，默认 `0.6`。例如 `0.8` 表示手柄移动 `10 cm`，目标 TCP 大约移动 `8 cm`。
 - `--rotation-scale`：手柄旋转到 TCP 旋转的比例，默认 `1.0`。设为 `0` 可以完全关闭手腕旋转，只保留平移。

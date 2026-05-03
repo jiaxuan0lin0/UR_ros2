@@ -20,6 +20,7 @@ class XrConfig:
     trigger_name: str = "right_trigger"
     emergency_button: str = "right_axis_click"
     grip_threshold: float = 0.95
+    grip_release_threshold: float = 0.8
     timeout_sec: float = 0.2
     scale_factor: float = 0.6
     rotation_scale: float = 1.0
