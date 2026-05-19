@@ -12,9 +12,12 @@ class StateWriter:
         self._next_write_time = 0.0
         self.path.parent.mkdir(parents=True, exist_ok=True)
 
-    def maybe_write(self, state: dict):
+    def should_write(self) -> bool:
+        return time.monotonic() >= self._next_write_time
+
+    def maybe_write(self, state: dict, force: bool = False):
         now = time.monotonic()
-        if now < self._next_write_time:
+        if not force and now < self._next_write_time:
             return
         self._next_write_time = now + self.period_sec
 
@@ -33,4 +36,3 @@ class StateWriter:
         finally:
             if os.path.exists(tmp_name):
                 os.unlink(tmp_name)
-

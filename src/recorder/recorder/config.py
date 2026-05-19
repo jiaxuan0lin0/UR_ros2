@@ -1,7 +1,7 @@
 from pathlib import Path
 
 UR_IP = "192.168.1.102"
-RECORD_HZ = 30
+RECORD_HZ = 30.0
 
 DATASET_ROOT = Path.home() / "UR" / "dataset"
 
@@ -10,6 +10,7 @@ GRIPPER_RAW_MIN = 0
 GRIPPER_RAW_MAX = 1000
 TELEOP_STATE_FILE = "/tmp/ur_teleop_state.json"
 TELEOP_STATE_TIMEOUT_SEC = 1.0
+SAMPLED_REPLAY_FILE = "/tmp/ur_sampled_replay.json"
 
 DEFAULT_RTDE_FREQUENCY = -1.0  # use the robot's default frequency
 

@@ -1,62 +1,153 @@
-# recorder
+# Recorder 使用说明
 
-`recorder` 是 ROS2 数据采集包，负责同步相机图像、UR RTDE 实际状态，以及 teleop 写出的 action 状态文件，最后保存成 episode 数据。
+`src/recorder` 是 ROS2 数据采集包。该包同步采集 RealSense 图像、UR observation 和 `teleop.py` 写出的 action state，并保存为 episode 文件夹。该包不控制机械臂，不控制夹爪。
 
-它不控制机械臂，也不控制夹爪。高性能方案中，控制由 `src/teleop/teleop.py` 直接完成，`recorder` 只做采集。
+## 1. 数据流
 
-## 节点
+```text
+RealSense cameras
+UR RTDE state or teleop actual state
+/tmp/ur_teleop_state.json
+  -> recorder
+  -> dataset/episode_*/
+      -> cam_*/
+      -> robot_states.json
+```
 
-### `record`
+## 2. 与 teleop 的关系
 
-主采集节点：
+| 项目 | 规则 |
+| --- | --- |
+| 机械臂控制 | 由 `src/teleop/teleop.py` 完成 |
+| 夹爪控制 | 由 `src/teleop/teleop.py` 完成 |
+| action 来源 | `teleop_state_file` 中的 `target_q`、`target_tcp_pose`、`gripper_target_raw` |
+| observation 来源 | 优先使用 teleop state 中的 `actual_q`、`actual_tcp_pose` |
+| 落盘频率 | `record_hz`，默认 `30.0` |
 
-- 启动 RealSense 相机。
-- 通过 RTDE 读取 UR 当前关节角和 TCP 位姿。
-- 从 `/tmp/ur_teleop_state.json` 读取 teleop action。
-- 通过 service 控制 episode 的 start/stop/save/discard。
-- 保存图像和 `robot_states.json`。
+推荐频率：
 
-### `keyboard_control`
+```text
+teleop --state-hz 30
+teleop --gripper-read-hz 30
+recorder record_hz:=30.0
+recorder color_fps:=30
+```
 
-键盘控制客户端：
+## 3. 工作站登录
 
-- `r`：开始录制
-- `c`：停止当前 episode
-- `s`：保存已停止的 episode
-- `q`：丢弃已停止的 episode
-- `x`：退出键盘控制节点
-
-如果 teleop 启动了 `--enable-recorder-control`，也可以不用这个键盘节点，直接用 XR 手柄按键控制录制。
-
-## 启动
+### 通用命令
 
 ```bash
-cd /home/ustc/UR
+ssh <ROBOT_USER>@<ROBOT_HOST> -p <SSH_PORT>
+cd <UR_WORKSPACE>
+```
+
+### 示例
+
+```bash
+ssh <SSH_USER>@<WORKSTATION_HOST> -p <SSH_PORT>
+cd /data/jiaxuanLin/UR
+```
+
+## 4. 构建 recorder
+
+### 通用命令
+
+```bash
+cd <UR_WORKSPACE>
 source /opt/ros/jazzy/setup.bash
-source /home/ustc/UR/.venv/bin/activate
+source <PYTHON_VENV>/bin/activate
 colcon build --symlink-install --packages-select recorder
-source /home/ustc/UR/install/setup.bash
+source install/setup.bash
+```
+
+### 示例
+
+```bash
+cd /data/jiaxuanLin/UR
+source /opt/ros/jazzy/setup.bash
+source /data/jiaxuanLin/UR/.venv/bin/activate
+colcon build --symlink-install --packages-select recorder
+source install/setup.bash
+```
+
+## 5. 启动 recorder
+
+### 通用命令
+
+```bash
+cd <UR_WORKSPACE>
+source /opt/ros/jazzy/setup.bash
+source <PYTHON_VENV>/bin/activate
+source install/setup.bash
+
+ros2 launch recorder record.launch.py \
+  robot_ip:=<ROBOT_IP> \
+  dataset_root:=<DATASET_ROOT> \
+  record_hz:=30.0 \
+  color_fps:=30 \
+  teleop_state_file:=<TELEOP_STATE_FILE> \
+  use_rtde_reader:=false \
+  diagnostics_sec:=2.0 \
+  sample_warning_sec:=0.04 \
+  python_executable:=<PYTHON_EXECUTABLE>
+```
+
+### 示例
+
+```bash
+cd /data/jiaxuanLin/UR
+source /opt/ros/jazzy/setup.bash
+source /data/jiaxuanLin/UR/.venv/bin/activate
+source install/setup.bash
 
 ros2 launch recorder record.launch.py \
   robot_ip:=192.168.1.102 \
-  dataset_root:=/home/ustc/UR/dataset \
+  dataset_root:=/data/jiaxuanLin/UR/dataset \
+  record_hz:=30.0 \
   color_fps:=30 \
   teleop_state_file:=/tmp/ur_teleop_state.json \
-  python_executable:=/home/ustc/UR/.venv/bin/python3
+  use_rtde_reader:=false \
+  diagnostics_sec:=2.0 \
+  sample_warning_sec:=0.04 \
+  python_executable:=/data/jiaxuanLin/UR/.venv/bin/python3
 ```
 
-另开一个终端启动键盘控制：
+## 6. 控制 recorder
+
+### 键盘控制
+
+通用命令：
 
 ```bash
-cd /home/ustc/UR
+cd <UR_WORKSPACE>
 source /opt/ros/jazzy/setup.bash
-source /home/ustc/UR/.venv/bin/activate
-source /home/ustc/UR/install/setup.bash
-
+source <PYTHON_VENV>/bin/activate
+source install/setup.bash
 ros2 run recorder keyboard_control
 ```
 
-也可以直接调用 service：
+示例：
+
+```bash
+cd /data/jiaxuanLin/UR
+source /opt/ros/jazzy/setup.bash
+source /data/jiaxuanLin/UR/.venv/bin/activate
+source install/setup.bash
+ros2 run recorder keyboard_control
+```
+
+键盘：
+
+| 按键 | 作用 |
+| --- | --- |
+| `r` | start |
+| `c` | stop |
+| `s` | save |
+| `q` | discard |
+| `x` | exit |
+
+### Service 控制
 
 ```bash
 ros2 service call /recorder/start std_srvs/srv/Trigger {}
@@ -65,21 +156,35 @@ ros2 service call /recorder/save std_srvs/srv/Trigger {}
 ros2 service call /recorder/discard std_srvs/srv/Trigger {}
 ```
 
-## Launch 参数
+`teleop.py --enable-recorder-control` 启用后，也可用 XR 手柄 `A/B/X/Y` 控制 recorder。
 
-- `robot_ip`：UR 控制器 IP，默认 `192.168.1.102`。
-- `rtde_frequency`：RTDE receive 频率，默认 `-1.0`，表示使用库默认值。
-- `dataset_root`：episode 保存目录，默认 `/home/ustc/UR/dataset`。
-- `color_width`：相机彩色图宽度，默认 `640`。
-- `color_height`：相机彩色图高度，默认 `480`。
-- `color_fps`：相机 FPS，默认 `30`。两台 RealSense 建议分别插到不同 USB 控制器/总线上。
-- `teleop_state_file`：teleop action 状态文件，默认 `/tmp/ur_teleop_state.json`。
-- `teleop_state_timeout_sec`：状态文件最大允许年龄，默认 `1.0` 秒。
-- `python_executable`：运行 recorder 的 Python，默认使用当前 `VIRTUAL_ENV` 下的 python3，否则 `/usr/bin/python3`。本机推荐显式传 `/home/ustc/UR/.venv/bin/python3`，因为 `rtde_receive` 装在这个虚拟环境里。
+## 7. Launch 参数
 
-## 输出目录
+| 参数 | 默认值 | 作用 |
+| --- | --- | --- |
+| `robot_ip` | `192.168.1.102` | UR 控制器 IP |
+| `rtde_frequency` | `-1.0` | RTDE receive 频率；`-1.0` 使用库默认值 |
+| `dataset_root` | `$UR_WORKSPACE/dataset` | episode 保存目录 |
+| `record_hz` | `30.0` | 最终样本落盘频率 |
+| `color_width` | `640` | RealSense 彩色图宽度 |
+| `color_height` | `480` | RealSense 彩色图高度 |
+| `color_fps` | `30` | RealSense 彩色图 FPS |
+| `teleop_state_file` | `/tmp/ur_teleop_state.json` | teleop action state 文件 |
+| `teleop_state_timeout_sec` | `1.0` | state file 最大允许年龄 |
+| `use_rtde_reader` | `false` | 是否由 recorder 另开 RTDE reader |
+| `diagnostics_sec` | `2.0` | 分段耗时诊断输出周期；`0` 表示关闭 |
+| `sample_warning_sec` | `0.04` | 单帧采样耗时 warning 阈值 |
+| `python_executable` | `$VIRTUAL_ENV/bin/python3` 或 `/usr/bin/python3` | 启动 recorder node 的 Python |
 
-每次 start 会创建一个临时 episode 目录：
+运行中调整频率：
+
+```bash
+ros2 param set /recorder record_hz 15.0
+```
+
+`record_hz` 不应高于 `color_fps`。`teleop --state-hz` 不应低于 `record_hz`。
+
+## 8. 输出目录
 
 ```text
 dataset/
@@ -93,16 +198,16 @@ dataset/
     robot_states.json
 ```
 
-只有调用 `/recorder/save` 后非空 episode 才会保留；空 episode 会在 save 时自动删除。调用 `/recorder/discard` 会删除当前 episode。
+空 episode 在 save 时删除。`discard` 会删除当前 episode。
 
-## 数据格式
-
-`robot_states.json` 是一个 frame list，每一帧结构如下：
+## 9. `robot_states.json` 格式
 
 ```json
 {
   "frame_idx": 0,
   "timestamp": 1710000000.123,
+  "status": "running",
+  "control_mode": "speed_j_dls",
   "observation": {
     "joint_positions": [0, 0, 0, 0, 0, 0],
     "tcp_pose": [0, 0, 0, 0, 0, 0],
@@ -116,53 +221,82 @@ dataset/
 }
 ```
 
-字段语义：
+| 字段 | 作用 |
+| --- | --- |
+| `frame_idx` | episode 内连续帧号 |
+| `timestamp` | recorder 采样时间 |
+| `status` | teleop 状态，例如 `running`、`return_home`、`replay_wait` |
+| `control_mode` | teleop 控制模式 |
+| `observation.joint_positions` | 实测关节角 |
+| `observation.tcp_pose` | 实测 TCP pose，UR rotvec |
+| `observation.gripper_position` | 实测夹爪位置，归一化 |
+| `action.joint_positions` | 控制目标关节角 |
+| `action.tcp_pose` | 控制目标 TCP pose |
+| `action.gripper_position` | 夹爪控制目标 |
 
-- `observation.joint_positions`：RTDE 读到的当前真实关节角。
-- `observation.tcp_pose`：RTDE 读到的当前真实 TCP 位姿，UR rotvec 表达。
-- `observation.gripper_position`：夹爪当前开合，归一化到 `0.0-1.0`。
-- `action.joint_positions`：teleop 实际发送给 `servoJ` 的目标关节角。
-- `action.tcp_pose`：teleop 限幅后的目标 TCP 位姿。
-- `action.gripper_position`：夹爪目标开合，归一化到 `0.0-1.0`。
+夹爪 action 表示控制目标，不保存为下一帧 observation。
 
-这个结构同时支持 joint-space 训练和 EEF/TCP-space 训练。
+## 10. 对齐逻辑
 
-## 与 teleop 同步
+1. recorder 按 `record_hz` 打拍。
+2. 每一拍获取 RealSense 帧。
+3. 同一拍读取 teleop state。
+4. 同一拍读取 RTDE 或使用 teleop actual state。
+5. 写入同一个 `frame_idx`。
 
-recorder 会先检查 teleop state file：
+state file 不存在、过期或缺少 action 字段时，该采样点跳过。
 
-- 文件不存在：跳过采样。
-- 文件过旧：跳过采样。
-- 缺少 `target_q` 或 `target_tcp_pose`：跳过采样。
+## 11. 检查 episode
 
-这样可以避免把 idle frame、无 action frame 或过期 action 写进训练数据。
+### 通用命令
 
-## 依赖
+```bash
+python3 - <<'PY'
+import json
+from pathlib import Path
 
-- `rclpy`
-- `std_srvs`
-- `pyrealsense2`
-- `rtde_receive`
-- OpenCV Python
+p = Path("<EPISODE_DIR>/robot_states.json")
+records = json.loads(p.read_text())
+statuses = [record.get("status") for record in records]
+print("frames:", len(records))
+print("return_home:", sum(status == "return_home" for status in statuses))
+print("tail:", statuses[-20:])
+PY
+```
 
-如果 `record` 启动失败，优先确认当前终端是否 source 了 ROS2、工作空间和 `.venv`：
+### 示例
+
+```bash
+python3 - <<'PY'
+import json
+from pathlib import Path
+
+p = Path("/data/jiaxuanLin/UR/dataset/episode_1710000000123/robot_states.json")
+records = json.loads(p.read_text())
+statuses = [record.get("status") for record in records]
+print("frames:", len(records))
+print("return_home:", sum(status == "return_home" for status in statuses))
+print("tail:", statuses[-20:])
+PY
+```
+
+## 12. 依赖检查
 
 ```bash
 source /opt/ros/jazzy/setup.bash
-source /home/ustc/UR/.venv/bin/activate
-source /home/ustc/UR/install/setup.bash
+source /data/jiaxuanLin/UR/.venv/bin/activate
+source /data/jiaxuanLin/UR/install/setup.bash
 
 python -c "import rclpy, rtde_receive, pyrealsense2; print('recorder deps ok')"
 ```
 
-## 常见问题
+## 13. 故障处理
 
-录不到数据：确认 teleop 正在运行，并且 `/tmp/ur_teleop_state.json` 在持续更新。
-
-一直提示 `missing target_joint_positions or target_tcp_pose`：teleop state file 还没有有效 action。确认 Quest 客户端已开启 `Tracking - Controller` 和 `Tracking - Data & Control - Send`，并且录制时按住右手 `grip` 让机械臂进入遥操作；`/tmp/ur_teleop_state.json` 里应出现 `target_q` 和 `target_tcp_pose`。
-
-一直提示 skipping sample：通常是没有按住 grip 产生有效 action，或者 teleop state file 已过期。
-
-相机打不开：确认 RealSense 设备没有被其他进程占用。
-
-保存后没有 episode：需要先 `r` start，再 `c` stop，最后 `s` save。
+| 现象 | 检查项 |
+| --- | --- |
+| 没有数据写入 | teleop 是否运行，`teleop_state_file` 是否持续更新 |
+| `missing target_joint_positions or target_tcp_pose` | 是否按住 grip 产生有效 action |
+| `skipping sample` | state file 过期、缺字段或相机帧未到 |
+| 相机打不开 | RealSense USB、序列号、占用进程 |
+| 保存后没有 episode | 需要 start、stop、save，且 episode 非空 |
+| 回位段缺失 | 检查 status 中是否包含 `return_home`，检查 `return-home-stop-grace-sec` |

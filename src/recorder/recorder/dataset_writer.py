@@ -80,6 +80,9 @@ class DatasetWriter:
     def wait_until_empty(self):
         self.sample_queue.join()
 
+    def queue_size(self) -> int:
+        return self.sample_queue.qsize()
+
     def _write_state_file(self):
         self.episode_dir.mkdir(parents=True, exist_ok=True)
         state_file = self.episode_dir / STATE_FILE_NAME

@@ -26,15 +26,35 @@ GRIPPER_JOINT_NAME = 'gripper_joint'
 class URCartesianDeltaControl(Node):
     """Action facade for Cartesian delta Servo control plus DH gripper."""
 
-    def __init__(self):
-        super().__init__('ur_cartesian_delta_control')
+    def __init__(
+        self,
+        *,
+        node_name: str = 'ur_cartesian_delta_control',
+        action_type=FollowCartesianDelta,
+        state_type=CartesianDeltaState,
+        action_name_parameter: str = 'cartesian_delta_action_name',
+        default_action_name: str = (
+            '/ur/cartesian_delta_control/follow_cartesian_delta'
+        ),
+        default_state_topic: str = '/ur/cartesian_delta_control/state',
+        default_target_pose_topic: str = (
+            '/ur/cartesian_delta_control/target_pose'
+        ),
+        default_command_frame: str = 'tool0',
+        mode_name: str = 'Cartesian delta',
+    ):
+        super().__init__(node_name)
+        self._action_type = action_type
+        self._state_type = state_type
+        self._action_name_parameter = action_name_parameter
+        self._mode_name = mode_name
         self.callback_group = ReentrantCallbackGroup()
         self._state_lock = threading.Lock()
         self._execution_lock = threading.Lock()
 
         self.declare_parameter(
-            'cartesian_delta_action_name',
-            '/ur/cartesian_delta_control/follow_cartesian_delta',
+            action_name_parameter,
+            default_action_name,
         )
         self.declare_parameter(
             'servo_pose_topic',
@@ -59,13 +79,13 @@ class URCartesianDeltaControl(Node):
         )
         self.declare_parameter(
             'state_topic',
-            '/ur/cartesian_delta_control/state',
+            default_state_topic,
         )
         self.declare_parameter(
             'target_pose_publish_topic',
-            '/ur/cartesian_delta_control/target_pose',
+            default_target_pose_topic,
         )
-        self.declare_parameter('command_frame', 'tool0')
+        self.declare_parameter('command_frame', default_command_frame)
         self.declare_parameter('servo_pose_frame', 'base_link')
         self.declare_parameter('tool_frame', 'tool0')
         self.declare_parameter('default_point_duration_sec', 1.0 / 30.0)
@@ -82,6 +102,7 @@ class URCartesianDeltaControl(Node):
         self.declare_parameter('tcp_pose_timeout_sec', 1.0)
         self.declare_parameter('pose_linear_tolerance', 0.003)
         self.declare_parameter('pose_angular_tolerance', 0.03)
+        self.declare_parameter('wait_for_final_pose_target', True)
         self.declare_parameter('pose_target_timeout_sec', 5.0)
         self.declare_parameter('gripper_joint_name', GRIPPER_JOINT_NAME)
         self.declare_parameter('gripper_default_speed', 100.0)
@@ -90,9 +111,7 @@ class URCartesianDeltaControl(Node):
         self.declare_parameter('gripper_timeout_sec', 3.0)
         self.declare_parameter('gripper_settle_time_sec', 0.0)
 
-        self.cartesian_delta_action_name = self.get_parameter(
-            'cartesian_delta_action_name'
-        ).value
+        self.action_name = self.get_parameter(action_name_parameter).value
         self.servo_pose_topic = self.get_parameter(
             'servo_pose_topic'
         ).value
@@ -155,6 +174,9 @@ class URCartesianDeltaControl(Node):
         )
         self.pose_angular_tolerance = float(
             self.get_parameter('pose_angular_tolerance').value
+        )
+        self.wait_for_final_pose_target = bool(
+            self.get_parameter('wait_for_final_pose_target').value
         )
         self.pose_target_timeout_sec = float(
             self.get_parameter('pose_target_timeout_sec').value
@@ -225,7 +247,7 @@ class URCartesianDeltaControl(Node):
             10,
         )
         self.state_pub = self.create_publisher(
-            CartesianDeltaState,
+            self._state_type,
             self.state_topic,
             10,
         )
@@ -236,8 +258,8 @@ class URCartesianDeltaControl(Node):
         )
         self.action_server = ActionServer(
             self,
-            FollowCartesianDelta,
-            self.cartesian_delta_action_name,
+            self._action_type,
+            self.action_name,
             execute_callback=self._execute_action,
             goal_callback=self._goal_callback,
             cancel_callback=self._cancel_callback,
@@ -252,20 +274,20 @@ class URCartesianDeltaControl(Node):
         )
 
         self.get_logger().info(
-            'UR Cartesian delta control ready: '
-            f'action={self.cartesian_delta_action_name}, '
+            f'UR {self._mode_name} control ready: '
+            f'action={self.action_name}, '
             f'servo_pose={self.servo_pose_topic}, '
             f'gripper={self.gripper_trajectory_topic}'
         )
 
     def _goal_callback(self, _goal_request):
         if self._execution_lock.locked():
-            self.get_logger().warn('reject Cartesian delta goal: busy')
+            self.get_logger().warn(f'reject {self._mode_name} goal: busy')
             return GoalResponse.REJECT
         return GoalResponse.ACCEPT
 
     def _cancel_callback(self, _goal_handle):
-        self.get_logger().info('accept Cartesian delta cancel request')
+        self.get_logger().info(f'accept {self._mode_name} cancel request')
         return CancelResponse.ACCEPT
 
     def _tcp_pose_callback(self, msg: PoseStamped):
@@ -289,7 +311,7 @@ class URCartesianDeltaControl(Node):
             active_point_count = self._active_point_count
             status = self._status
 
-        msg = CartesianDeltaState()
+        msg = self._state_type()
         msg.header.stamp = self.get_clock().now().to_msg()
         if tcp_pose is not None:
             msg.tcp_pose = tcp_pose
@@ -306,7 +328,7 @@ class URCartesianDeltaControl(Node):
             return self._finish_action(
                 goal_handle,
                 'abort',
-                'UR Cartesian delta control is busy.',
+                f'UR {self._mode_name} control is busy.',
             )
 
         self._set_status(True, 0, 0, 'starting')
@@ -315,7 +337,7 @@ class URCartesianDeltaControl(Node):
         except Exception as exc:
             self._publish_current_tool_pose_target(self.servo_pose_frame)
             finish_state = 'abort'
-            message = f'Cartesian delta execution failed: {exc}'
+            message = f'{self._mode_name} execution failed: {exc}'
             self.get_logger().error(message)
         finally:
             self._set_status(False, 0, 0, 'idle')
@@ -327,7 +349,7 @@ class URCartesianDeltaControl(Node):
         request = goal_handle.request
         points = list(request.points)
         if not points:
-            return 'abort', 'Received empty Cartesian delta chunk.'
+            return 'abort', f'Received empty {self._mode_name} chunk.'
 
         command_frame = request.command_frame.strip() or self.command_frame
         point_duration_sec = self._point_duration_sec()
@@ -386,9 +408,10 @@ class URCartesianDeltaControl(Node):
         for index, point in enumerate(points):
             if goal_handle.is_cancel_requested:
                 self._publish_current_tool_pose_target(target_frame)
-                return 'cancel', 'Cartesian delta goal canceled.'
+                return 'cancel', f'{self._mode_name} goal canceled.'
 
-            target_pose = self._apply_cartesian_delta(
+            reference_pose = target_pose
+            target_pose = self._apply_delta(
                 target_pose,
                 point,
                 command_frame,
@@ -405,20 +428,22 @@ class URCartesianDeltaControl(Node):
                 target_pose,
                 point_duration_sec,
                 goal_handle,
+                start_pose=reference_pose,
             )
             if cancel_requested:
                 self._publish_current_tool_pose_target(target_frame)
-                return 'cancel', 'Cartesian delta goal canceled.'
+                return 'cancel', f'{self._mode_name} goal canceled.'
 
-        target_reached = self._wait_for_pose_target(target_pose, goal_handle)
-        if goal_handle.is_cancel_requested:
-            self._publish_current_tool_pose_target(target_frame)
-            return 'cancel', 'Cartesian delta goal canceled.'
-        if not target_reached:
-            return (
-                'abort',
-                'Timed out waiting for final Cartesian pose target.',
-            )
+        if self.wait_for_final_pose_target:
+            target_reached = self._wait_for_pose_target(target_pose, goal_handle)
+            if goal_handle.is_cancel_requested:
+                self._publish_current_tool_pose_target(target_frame)
+                return 'cancel', f'{self._mode_name} goal canceled.'
+            if not target_reached:
+                return (
+                    'abort',
+                    f'Timed out waiting for final {self._mode_name} pose target.',
+                )
 
         final_gripper_target = self._final_gripper_target(points)
         if request.wait_for_gripper and final_gripper_target is not None:
@@ -435,16 +460,19 @@ class URCartesianDeltaControl(Node):
             goal_handle,
             total_points,
             total_points,
-            'Cartesian delta chunk completed.',
+            f'{self._mode_name} chunk completed.',
         )
-        return 'succeed', 'Cartesian delta chunk completed.'
+        return 'succeed', f'{self._mode_name} chunk completed.'
 
     def _stream_pose_target(
         self,
         target_pose: PoseStamped,
         duration_sec: float,
         goal_handle,
+        *,
+        start_pose: PoseStamped | None = None,
     ) -> bool:
+        del start_pose
         period_sec = 1.0 / max(self.servo_command_hz, 1.0)
         end_time = time.monotonic() + duration_sec
 
@@ -541,6 +569,20 @@ class URCartesianDeltaControl(Node):
         target_q = self._quaternion_multiply(delta_in_target, current_q)
         target_pose.pose.orientation = self._tuple_to_quaternion(target_q)
         return target_pose
+
+    def _apply_delta(
+        self,
+        reference_pose: PoseStamped,
+        point,
+        command_frame: str,
+        target_frame: str,
+    ) -> PoseStamped:
+        return self._apply_cartesian_delta(
+            reference_pose,
+            point,
+            command_frame,
+            target_frame,
+        )
 
     def _current_tool_pose_in_frame(self, target_frame: str):
         resolved_frame = target_frame.strip() if target_frame else ''
@@ -911,7 +953,7 @@ class URCartesianDeltaControl(Node):
         total_points: int,
         message: str,
     ):
-        feedback = FollowCartesianDelta.Feedback()
+        feedback = self._action_type.Feedback()
         feedback.current_point_index = int(point_index)
         feedback.total_points = int(total_points)
         feedback.message = message
@@ -940,7 +982,7 @@ class URCartesianDeltaControl(Node):
             self._status = status
 
     def _finish_action(self, goal_handle, finish_state: str, message: str):
-        result = FollowCartesianDelta.Result()
+        result = self._action_type.Result()
         result.success = finish_state == 'succeed'
         result.message = message
 

@@ -32,6 +32,7 @@ setup(
         'console_scripts': [
             'record = recorder.record:main',
             'keyboard_control = recorder.keyboard_control:main',
+            'fix_gripper_targets = recorder.fix_gripper_targets:main',
         ],
     },
 )

@@ -45,6 +45,16 @@ class RecorderControl:
         self.last_call_time[action] = now
         self._call(action, now)
 
+    def request_blocking(self, action: str, timeout_sec: float = 3.0) -> bool:
+        if action not in self.SERVICES:
+            raise ValueError(f"unsupported recorder action: {action}")
+
+        now = time.monotonic()
+        if now - self.last_call_time[action] < self.debounce_sec:
+            return False
+        self.last_call_time[action] = now
+        return self._call_blocking(action, now, timeout_sec=timeout_sec)
+
     def _call(self, action: str, now: float):
         if shutil.which("ros2") is None:
             if now - self.last_missing_ros2_log_time >= 2.0:
@@ -71,6 +81,47 @@ class RecorderControl:
         )
         self.pending_calls.append((action, service_name, process))
         print(f"Recorder {action} requested.")
+
+    def _call_blocking(self, action: str, now: float, timeout_sec: float) -> bool:
+        if shutil.which("ros2") is None:
+            if now - self.last_missing_ros2_log_time >= 2.0:
+                print("ros2 command is not available. Source ROS 2 before starting teleop.")
+                self.last_missing_ros2_log_time = now
+            return False
+
+        service_name = self.SERVICES[action]
+        cmd = [
+            "ros2",
+            "service",
+            "call",
+            service_name,
+            "std_srvs/srv/Trigger",
+            "{}",
+        ]
+        print(f"Recorder {action} requested.")
+        try:
+            process = subprocess.run(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=max(0.1, float(timeout_sec)),
+            )
+        except subprocess.TimeoutExpired:
+            print(f"Recorder {action} timed out waiting for {service_name}.")
+            return False
+
+        output = (process.stdout + process.stderr).strip()
+        message = self._last_nonempty_line(output)
+        if process.returncode == 0:
+            if message:
+                print(f"Recorder {action} response: {message}")
+            else:
+                print(f"Recorder {action} command completed.")
+            return True
+
+        print(f"Recorder {action} failed: {message or 'ros2 service call failed'}")
+        return False
 
     def _drain_completed(self):
         still_pending = []

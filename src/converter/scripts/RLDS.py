@@ -2,7 +2,9 @@
 """Convert recorder episodes to a TFDS/RLDS dataset."""
 
 import argparse
+from collections import Counter
 import json
+import math
 import shutil
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -12,6 +14,8 @@ EPISODE_PREFIX = "episode_"
 STATE_FILE_NAME = "robot_states.json"
 CAMERA_DIR_PREFIX = "cam_"
 DATASET_VERSION = "1.0.0"
+TWO_PI = 2.0 * math.pi
+ROTATION_EPS = 1.0e-12
 
 
 class EpisodeFormatError(ValueError):
@@ -76,6 +80,16 @@ def parse_args() -> argparse.Namespace:
         "--overwrite",
         action="store_true",
         help="Remove the existing converted dataset version before writing.",
+    )
+    parser.add_argument(
+        "--unwrap-tcp-rotvec",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Unwrap tcp_pose rotation-vector branches across each episode before "
+            "writing RLDS. Enabled by default; use --no-unwrap-tcp-rotvec to keep "
+            "raw UR rotvec values."
+        ),
     )
     return parser.parse_args()
 
@@ -257,12 +271,22 @@ def print_summaries(
 
     for episode_dir, records, image_count in summaries:
         duration = records[-1]["timestamp"] - records[0]["timestamp"]
+        status_counts = Counter(
+            record["status"]
+            if isinstance(record.get("status"), str) and record.get("status")
+            else "unknown"
+            for record in records
+        )
+        status_summary = ", ".join(
+            f"{status}={count}"
+            for status, count in sorted(status_counts.items())
+        )
         total_frames += len(records)
         total_images += image_count
         print(
             f"{episode_dir.name}: {len(records)} frames, "
             f"{duration:.3f}s, cameras=[{camera_label}], "
-            f"images={image_count}"
+            f"images={image_count}, statuses=[{status_summary}]"
         )
 
     print(
@@ -273,6 +297,91 @@ def print_summaries(
 
 def as_float_list(values: Sequence[Any]) -> List[float]:
     return [float(value) for value in values]
+
+
+def squared_distance(left: Sequence[float], right: Sequence[float]) -> float:
+    return sum((a - b) * (a - b) for a, b in zip(left, right))
+
+
+def vector_norm(values: Sequence[float]) -> float:
+    return math.sqrt(sum(value * value for value in values))
+
+
+def nearest_equivalent_rotvec(
+    rotvec: Sequence[float],
+    reference: Sequence[float],
+) -> List[float]:
+    """Choose the 2pi-equivalent rotvec nearest to the previous unwrapped value."""
+    current = [float(value) for value in rotvec]
+    ref = [float(value) for value in reference]
+
+    norm = vector_norm(current)
+    if norm > ROTATION_EPS:
+        axis = [value / norm for value in current]
+    else:
+        ref_norm = vector_norm(ref)
+        if ref_norm <= ROTATION_EPS:
+            return current
+        axis = [value / ref_norm for value in ref]
+
+    projected_turns = sum((ref[i] - current[i]) * axis[i] for i in range(3)) / TWO_PI
+    center = int(round(projected_turns))
+    candidates = [
+        [current[i] + TWO_PI * turns * axis[i] for i in range(3)]
+        for turns in range(center - 2, center + 3)
+    ]
+    return min(candidates, key=lambda candidate: squared_distance(candidate, ref))
+
+
+def unwrap_rotvec_sequence(rotvecs: Sequence[Sequence[Any]]) -> List[List[float]]:
+    """Make a sequence of UR rotation vectors continuous across +/-pi branches."""
+    unwrapped = []
+    previous = None
+    for raw_rotvec in rotvecs:
+        current = as_float_list(raw_rotvec)
+        if previous is None:
+            chosen = current
+        else:
+            chosen = nearest_equivalent_rotvec(current, previous)
+        unwrapped.append(chosen)
+        previous = chosen
+    return unwrapped
+
+
+def records_with_unwrapped_tcp_rotvecs(
+    records: Sequence[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Return records with observation/action tcp_pose rotvec branches unwrapped."""
+    observation_rotvecs = [
+        record["observation"]["tcp_pose"][3:]
+        for record in records
+    ]
+    action_rotvecs = [
+        record["action"]["tcp_pose"][3:]
+        for record in records
+    ]
+    unwrapped_observation_rotvecs = unwrap_rotvec_sequence(observation_rotvecs)
+    unwrapped_action_rotvecs = unwrap_rotvec_sequence(action_rotvecs)
+
+    unwrapped_records = []
+    for record, observation_rotvec, action_rotvec in zip(
+        records,
+        unwrapped_observation_rotvecs,
+        unwrapped_action_rotvecs,
+    ):
+        observation = dict(record["observation"])
+        action = dict(record["action"])
+
+        observation_tcp_pose = as_float_list(observation["tcp_pose"])
+        action_tcp_pose = as_float_list(action["tcp_pose"])
+        observation["tcp_pose"] = observation_tcp_pose[:3] + observation_rotvec
+        action["tcp_pose"] = action_tcp_pose[:3] + action_rotvec
+
+        converted = dict(record)
+        converted["observation"] = observation
+        converted["action"] = action
+        unwrapped_records.append(converted)
+    return unwrapped_records
 
 
 def observation_state(record: Dict[str, Any]) -> List[float]:
@@ -341,6 +450,7 @@ def make_builder_class(
             language_instruction: str,
             reward_mode: str,
             terminal_on_last: bool,
+            unwrap_tcp_rotvec: bool,
             **kwargs: Any,
         ):
             self.episode_dirs = [Path(path) for path in episode_dirs]
@@ -349,6 +459,7 @@ def make_builder_class(
             self.language_instruction = language_instruction
             self.reward_mode = reward_mode
             self.terminal_on_last = terminal_on_last
+            self.unwrap_tcp_rotvec = bool(unwrap_tcp_rotvec)
             super().__init__(**kwargs)
 
         def _info(self):
@@ -492,6 +603,8 @@ def make_builder_class(
         def _generate_examples(self, episode_dirs):
             for episode_dir in episode_dirs:
                 records = read_episode_records(episode_dir, self.state_file)
+                if self.unwrap_tcp_rotvec:
+                    records = records_with_unwrapped_tcp_rotvecs(records)
                 steps = []
                 num_steps = len(records)
 
@@ -584,6 +697,7 @@ def build_rlds_dataset(
         language_instruction=args.language_instruction,
         reward_mode=args.reward_mode,
         terminal_on_last=args.terminal_on_last,
+        unwrap_tcp_rotvec=args.unwrap_tcp_rotvec,
     )
 
     dataset_path = Path(str(builder.data_dir)) / builder.name / str(builder.version)

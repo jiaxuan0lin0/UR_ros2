@@ -1,0 +1,7 @@
+std_msgs/Header header
+geometry_msgs/PoseStamped tcp_pose
+sensor_msgs/JointState gripper_state
+bool busy
+uint32 active_point_index
+uint32 active_point_count
+string status

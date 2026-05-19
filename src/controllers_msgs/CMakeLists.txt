@@ -10,7 +10,10 @@ find_package(std_msgs REQUIRED)
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/CartesianDeltaPoint.msg"
   "msg/CartesianDeltaState.msg"
+  "msg/TcpRotvecDeltaPoint.msg"
+  "msg/TcpRotvecDeltaState.msg"
   "action/FollowCartesianDelta.action"
+  "action/FollowTcpRotvecDelta.action"
   DEPENDENCIES
     geometry_msgs
     sensor_msgs

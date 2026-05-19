@@ -1,0 +1,24 @@
+[INFO] [launch]: All log files can be found below /home/ustc/.ros/log/2026-05-06-20-54-57-069376-ustclab-292990
+[INFO] [launch]: Default logging verbosity is set to INFO
+[INFO] [gripper-1]: process started with pid [293001]
+[INFO] [python3-2]: process started with pid [293002]
+[python3-2] [INFO] [1778072097.484361968] [policy_control]: Policy control ready: policy=http://127.0.0.1:8777, controller=direct_rtde_servoj, mode=rtde_servoj_joint_abs, autostart=False, dry_run=False
+[gripper-1] [INFO] [1778072101.690869787] [gripper]: gripper connected on /tmp/ttyUR @ 115200
+[python3-2] [INFO] [1778072246.595970035] [policy_control]: policy health: {'status': 'ok', 'checkpoint': '/data/jiaxuanLin/HIF-VLA/output/train/apple_joint_abs/ur7e-apple-joint-abs-20260506_110326--20000_chkpt', 'use_film': True, 'num_images_in_input': 2, 'unnorm_key': 'ur7e_joint_abs_rlds', 'history': {'num_frames': 0, 'num_actions': 8, 'history_length': 8}}
+[python3-2] [INFO] [1778072250.943630784] [policy_control]: policy action chunk: raw_actions=8, selected_actions=8, proprio0_2=[-1.5708 -1.5708 -1.5708], gripper=1.000, first=[-1.5611 -1.5717 -1.5711 -1.5599  1.5716 -0.0295  0.9883], last=[-1.5032 -1.5462 -1.5921 -1.547   1.5727 -0.022   0.9902], inference=sync
+[gripper-1] [INFO] [1778072250.944717015] [gripper]: queued 1 trajectory points, pending=1
+[gripper-1] [INFO] [1778072250.963177500] [gripper]: send command pos=990 vel=100 eff=100
+[gripper-1] [INFO] [1778072251.033100231] [gripper]: gripper motion finished, state=1
+[python3-2] [INFO] [1778072252.148075394] [policy_control]: direct RTDE servoJ completed 8 points in 1.199s; actions=8; async_prefetch=started
+[python3-2] [INFO] [1778072266.396729809] [policy_control]: waited 14.248s for async policy result
+[python3-2] [INFO] [1778072266.397353089] [policy_control]: policy action chunk: raw_actions=8, selected_actions=8, proprio0_2=[-1.5562 -1.5689 -1.5754], gripper=0.990, first=[-1.5611 -1.5705 -1.5746 -1.5486  1.5721 -0.031   0.9863], last=[-1.4976 -1.5398 -1.5991 -1.5389  1.5721 -0.0205  0.9883], inference=async age=0.001s latency=15.147s
+[python3-2] [INFO] [1778072267.588242989] [policy_control]: direct RTDE servoJ completed 8 points in 1.187s; actions=8; async_prefetch=started
+[python3-2] [INFO] [1778072288.943003992] [policy_control]: waited 21.354s for async policy result
+[python3-2] [INFO] [1778072288.943467587] [policy_control]: policy action chunk: raw_actions=8, selected_actions=8, proprio0_2=[-1.5498 -1.5639 -1.5783], gripper=0.990, first=[-1.5611 -1.5676 -1.5746 -1.5406  1.5721 -0.0326  0.9883], last=[-1.4866 -1.5366 -1.6008 -1.5357  1.5705 -0.028   0.9883], inference=async age=0.001s latency=22.189s
+[python3-2] [INFO] [1778072290.213942095] [policy_control]: direct RTDE servoJ completed 8 points in 1.251s; actions=8; async_prefetch=started
+[python3-2] [INFO] [1778072312.016740920] [policy_control]: waited 21.803s for async policy result
+[python3-2] [INFO] [1778072312.017269708] [policy_control]: policy action chunk: raw_actions=8, selected_actions=8, proprio0_2=[-1.5484 -1.5612 -1.5791], gripper=0.990, first=[-1.5556 -1.566  -1.5764 -1.5373  1.5727 -0.0326  0.9883], last=[-1.4839 -1.5285 -1.6043 -1.5341  1.5688 -0.0303  0.9902], inference=async age=0.000s latency=22.737s
+[python3-2] [INFO] [1778072313.208672511] [policy_control]: direct RTDE servoJ completed 8 points in 1.186s; actions=8; async_prefetch=started
+[python3-2] [INFO] [1778072327.696338857] [policy_control]: waited 14.487s for async policy result
+[python3-2] [INFO] [1778072327.696918979] [policy_control]: policy action chunk: raw_actions=8, selected_actions=8, proprio0_2=[-1.5498 -1.5612 -1.5797], gripper=0.990, first=[-1.5556 -1.5647 -1.5764 -1.5325  1.5727 -0.0326  0.9863], last=[-1.4756 -1.5262 -1.6078 -1.5309  1.5671 -0.0326  0.9883], inference=async age=0.001s latency=15.409s
+[python3-2] [INFO] [1778072328.928869683] [policy_control]: direct RTDE servoJ completed 8 points in 1.228s; actions=8; async_prefetch=started

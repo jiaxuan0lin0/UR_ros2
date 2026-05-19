@@ -1,105 +1,187 @@
-# Teleop
+# Teleop 使用说明
 
-`src/teleop` 是当前推荐的高性能遥操作链路。它不经过 MoveIt Servo、`ros2_control` 或 ROS2 action，而是直接用 XR 输入生成目标位姿，再通过 RTDE 控制 UR 机械臂，同时直接通过 `/tmp/ttyUR` 控制 DH 夹爪。
+`src/teleop` 是 XR 遥操作采集链路。它直接读取 XRoboToolkit 输入，通过 RTDE 控制 UR 机械臂，并通过 `/tmp/ttyUR` 控制 DH 夹爪。采集时，`teleop.py` 同步写出 state file，`recorder` 读取该文件生成训练数据。
 
-## 数据流
+## 1. 数据流
 
 ```text
-XRoboToolkit PC Service
+XR headset/controller
+  -> XRoboToolkit PC Service
   -> xrobotoolkit_sdk
-  -> teleop.py
-      -> RTDE servoJ / servoL 控制 UR
-      -> /tmp/ttyUR Modbus 控制 DH 夹爪
-      -> /tmp/ur_teleop_state.json 写出当前 action
-  -> recorder 读取 action 并同步相机/机械臂 observation
+  -> src/teleop/teleop.py
+      -> RTDE speedJ / servoJ / servoL
+      -> /tmp/ttyUR DH gripper
+      -> /tmp/ur_teleop_state.json
+  -> src/recorder reads state file
+  -> recorder episode
 ```
 
-`teleop.py` 写出的 state file 只作为 recorder 的动作源，不是最终训练数据。最终数据由 `recorder` 写成 `observation/action` 结构。
+## 2. 控制入口规则
 
-## 启动前要求
+同一时间只能保留一个机械臂控制入口。
 
-- 机器人 IP 可达，默认 `192.168.1.102`。
-- XRoboToolkit PC Service 已启动，且当前 Python 环境可以 import `xrobotoolkit_sdk`。
-- 如果使用 DH 夹爪，机器人端 ToolComm Forwarder URCap 需要运行，PC 端需要先创建 `/tmp/ttyUR`。
-- 不要同时启动 `ur_control.launch.py`、MoveIt Servo 或 ROS2 `gripper` 节点来控制同一台机械臂/夹爪。
+| 入口 | 规则 |
+| --- | --- |
+| `teleop.py` | 推荐用于 XR 数据采集 |
+| `policy_client` | 推荐用于 policy 部署 |
+| `controllers` | 用于 ROS2 action/topic 调试 |
+| `ur_robot_driver` + MoveIt Servo | 不与 direct RTDE teleop 同时运行 |
 
-## 启动 XRoboToolkit PC Service
+`/tmp/ttyUR` 同一时间只能被一个夹爪进程占用。运行 `teleop.py` 时，不启动 `controllers/gripper`。
 
-这台机器上已经安装了 XRoboToolkit PC Service，安装路径是：
+## 3. 工作站登录
 
-```text
-/opt/apps/roboticsservice
-```
-
-命令行启动服务：
+### 通用命令
 
 ```bash
-/opt/apps/roboticsservice/runService.sh
+ssh <ROBOT_USER>@<ROBOT_HOST> -p <SSH_PORT>
+cd <UR_WORKSPACE>
 ```
 
-也可以从桌面应用里启动：
-
-```text
-XRoboToolkit-PC-Service
-```
-
-检查服务是否已经运行：
+### 示例
 
 ```bash
-pgrep -af RoboticsServiceProcess
+ssh <SSH_USER>@<WORKSTATION_HOST> -p <SSH_PORT>
+cd /data/jiaxuanLin/UR
 ```
 
-如果能看到类似下面的进程，就说明 PC Service 已经起来了：
+## 4. 低延迟环境检查
+
+500 Hz 遥操作依赖稳定的 PC 调度、网络和 RTDE 周期。推荐使用 lowlatency kernel、`performance` CPU governor 和实时优先级。
+
+### 通用命令
+
+```bash
+uname -r
+groups
+ulimit -r
+ulimit -l
+systemctl status ur-performance-governor.service --no-pager
+for f in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
+  cat "$f"
+done | sort | uniq -c
+```
+
+### 示例期望输出
 
 ```text
-./RoboticsServiceProcess
+6.8.0-111-lowlatency
+groups 中包含 realtime
+ulimit -r 输出 99
+ulimit -l 输出 unlimited
+CPU governor 为 performance
 ```
 
-XR 头显/手柄端还需要打开 XRoboToolkit 的 Quest/PICO 客户端，并连接到这台 PC。PC Service 是本机服务，`xrobotoolkit_sdk` 会通过它读取手柄姿态、trigger、grip、按钮等数据。
+## 5. 启动 XRoboToolkit PC Service
 
-**坐标对齐要求：Quest/PICO 里启动 XRoboToolkit 客户端时，软件界面的正前方应当朝向机械臂 base 坐标系的正 X 方向。** 这个初始朝向会影响手柄坐标到机器人 base 坐标的映射；如果朝向不对，就容易出现左右、前后不对齐，或者手柄直线移动但机械臂斜着走。
+### 通用命令
 
-## Python 环境
+```bash
+cd <UR_WORKSPACE>
+src/teleop/start_xr_service_rt.sh
+```
 
-这台机器上 `xrobotoolkit_sdk` 装在 conda 环境 `XRobo` 里。启动 teleop 前建议这样进入环境：
+### 示例
+
+```bash
+cd /data/jiaxuanLin/UR
+src/teleop/start_xr_service_rt.sh
+```
+
+### 重启服务
+
+```bash
+cd /data/jiaxuanLin/UR
+src/teleop/start_xr_service_rt.sh --restart
+```
+
+### 检查服务
+
+```bash
+ps -o pid,pri,rtprio,cls,ni,cmd -p "$(pgrep -d, -x RoboticsService)"
+```
+
+XR 客户端启动时，软件正前方应朝向机器人 base 坐标系 `+X` 方向。该朝向决定手柄坐标到机器人 base 坐标的映射。
+
+## 6. Python 环境
+
+### 通用命令
+
+```bash
+source <CONDA_ROOT>/etc/profile.d/conda.sh
+conda activate <XR_ENV_NAME>
+python -c "import xrobotoolkit_sdk as xrt; print(xrt.__file__)"
+```
+
+### 示例
 
 ```bash
 source /home/ustc/anaconda3/etc/profile.d/conda.sh
 conda activate XRobo
-```
-
-检查 SDK 是否可 import：
-
-```bash
 python -c "import xrobotoolkit_sdk as xrt; print(xrt.__file__)"
 ```
 
-预期输出类似：
-
-```text
-/home/ustc/anaconda3/envs/XRobo/lib/python3.11/site-packages/xrobotoolkit_sdk.cpython-311-x86_64-linux-gnu.so
-```
-
-检查 SDK 和 PC Service 是否能连接：
+### 检查 XR 时间戳
 
 ```bash
 python -c "import xrobotoolkit_sdk as xrt; xrt.init(); print(xrt.get_time_stamp_ns()); xrt.close()"
 ```
 
-如果输出时间戳为 `0`，通常表示 SDK 已连上 PC Service，但当前头显/手柄数据还没有进入服务；打开并连接 XR 客户端后会变成有效时间戳。
+时间戳为 `0` 表示 PC Service 已连接但 XR 客户端尚未发送有效 tracking 数据。
 
-## 推荐启动
+## 7. XR 链路诊断
 
-先让机械臂进入可 RTDE 控制状态。示教器需要切到 `Remote Control`，然后通过 Dashboard Server 上电并释放刹车：
+### 通用命令
 
 ```bash
-cd /home/ustc/UR
+cd <UR_WORKSPACE>
+source <CONDA_ROOT>/etc/profile.d/conda.sh
+conda activate <XR_ENV_NAME>
+python3 src/teleop/diagnose_xr_stream.py \
+  --duration-sec 30 \
+  --poll-hz 1000
+```
+
+### 示例
+
+```bash
+cd /data/jiaxuanLin/UR
+source /home/ustc/anaconda3/etc/profile.d/conda.sh
+conda activate XRobo
+python3 src/teleop/diagnose_xr_stream.py \
+  --duration-sec 30 \
+  --poll-hz 1000
+```
+
+| 输出项 | 含义 |
+| --- | --- |
+| `Effective update rate` | XR 源头有效更新率 |
+| `p95/p99/max` | XR 数据间隔分布 |
+| `Large gaps` | 大于 100 ms 或 200 ms 的链路断续次数 |
+
+`--rate-hz 500` 是机器人控制环重采样频率，不代表 XR 手柄源头能达到 500 Hz。
+
+## 8. 准备机器人
+
+### 上电和释放刹车
+
+通用命令：
+
+```bash
+cd <UR_WORKSPACE>
+python3 src/teleop/start_ur.py --robot-ip <ROBOT_IP>
+```
+
+示例：
+
+```bash
+cd /data/jiaxuanLin/UR
 python3 src/teleop/start_ur.py --robot-ip 192.168.1.102
 ```
 
-这一步不是启动 `ur_robot_driver`。`teleop.py` 启动时会通过 `RTDEControlInterface` 连接机器人并启动 RTDE 控制脚本。
+### 保护停解锁
 
-如果机器人处于 `PROTECTIVE_STOP`，脚本默认不会自动解锁。确认现场安全后再显式执行：
+确认现场安全后使用：
 
 ```bash
 python3 src/teleop/start_ur.py \
@@ -107,7 +189,7 @@ python3 src/teleop/start_ur.py \
   --unlock-protective-stop
 ```
 
-只想检查当前 dashboard 状态，不上电、不松刹车：
+### 只检查 Dashboard 状态
 
 ```bash
 python3 src/teleop/start_ur.py \
@@ -117,261 +199,303 @@ python3 src/teleop/start_ur.py \
   --no-wait-running
 ```
 
-先创建 `/tmp/ttyUR`：
+## 9. 创建夹爪串口
+
+### 通用命令
 
 ```bash
+source /opt/ros/jazzy/setup.bash
+python3 /opt/ros/jazzy/lib/ur_client_library/tool_communication.py \
+  <ROBOT_IP> \
+  --device-name <TOOL_TTY>
+```
+
+### 示例
+
+```bash
+source /opt/ros/jazzy/setup.bash
 python3 /opt/ros/jazzy/lib/ur_client_library/tool_communication.py \
   192.168.1.102 \
   --device-name /tmp/ttyUR
 ```
 
-启动 teleop：
+该终端需要保持运行。禁用夹爪时，在 teleop 命令中加入 `--disable-gripper`。
+
+## 10. 启动 teleop
+
+完整推荐命令见 [cmd.md](cmd.md)。
+
+### 通用命令
 
 ```bash
-cd /home/ustc/UR
+cd <UR_WORKSPACE>
+source <CONDA_ROOT>/etc/profile.d/conda.sh
+conda activate <XR_ENV_NAME>
+source /opt/ros/jazzy/setup.bash
+source <UR_WORKSPACE>/install/setup.bash
+
+python3 src/teleop/teleop.py \
+  --robot-ip <ROBOT_IP> \
+  --ur-type <UR_TYPE> \
+  --control-mode speed_j_dls \
+  --speedj-backend register_bridge \
+  --rate-hz 500 \
+  --gripper-port <TOOL_TTY> \
+  --gripper-rate-hz 30 \
+  --gripper-read-hz 30 \
+  --state-file <TELEOP_STATE_FILE> \
+  --state-hz 30 \
+  --enable-recorder-control
+```
+
+### 示例
+
+```bash
+cd /data/jiaxuanLin/UR
 source /home/ustc/anaconda3/etc/profile.d/conda.sh
 conda activate XRobo
 source /opt/ros/jazzy/setup.bash
-source /home/ustc/UR/install/setup.bash
+source /data/jiaxuanLin/UR/install/setup.bash
 
 python3 src/teleop/teleop.py \
   --robot-ip 192.168.1.102 \
-  --control-mode servo_j \
-  --rate-hz 300 \
-  --max-velocity 0.15 \
-  --max-acceleration 0.15 \
-  --lookahead-time 0.12 \
-  --servo-gain 300 \
-  --scale-factor 0.8 \
-  --rotation-scale 0.8 \
-  --max-step-translation 0.002 \
-  --max-step-rotation 0.005 \
-  --max-joint-step 0.003 \
+  --ur-type ur7e \
+  --control-mode speed_j_dls \
+  --speedj-backend register_bridge \
+  --rate-hz 500 \
   --gripper-port /tmp/ttyUR \
+  --gripper-rate-hz 30 \
+  --gripper-read-hz 30 \
   --state-file /tmp/ur_teleop_state.json \
-  --enable-recorder-control \
-  --return-home-max-joint-step 0.003 \
-  --return-home-timeout-sec 30
+  --state-hz 30 \
+  --enable-recorder-control
 ```
 
-## 遥操作按键
+## 11. 按键
 
-默认控制：
+| 控件 | 作用 |
+| --- | --- |
+| 右手 `grip` | 按住后机械臂跟随 |
+| 右手 `trigger` | 控制夹爪开合 |
+| 右摇杆按下 | 急停 teleop |
+| `A` | recorder start |
+| `B` | 回 home 后 recorder stop |
+| `X` | recorder save |
+| `Y` | recorder discard |
+| 左手 `grip` | 回位后 replay 触发，需启用 `--replay-after-return-home` |
 
-- 右手 `grip`：按住才移动机械臂。
-- 右手 `trigger`：控制夹爪开合。
-- 右摇杆按下：急停 teleop。
+## 12. 频率约定
 
-开启 `--enable-recorder-control` 后，默认录制控制：
+| 项目 | 默认值 | 说明 |
+| --- | --- | --- |
+| `--rate-hz` | `500` | 机械臂主控制循环 |
+| `--state-hz` | `30` | 写 `/tmp/ur_teleop_state.json` |
+| `--gripper-rate-hz` | `30` | DH 夹爪命令线程 |
+| `--gripper-read-hz` | `30` | DH 夹爪位置读取线程 |
+| recorder `record_hz` | `30` | 最终落盘频率 |
 
-- `A`：调用 `/recorder/start`
-- `B`：先自动回到 home 位姿，这段回位继续被 recorder 记录；到位后再调用 `/recorder/stop`
-- `X`：调用 `/recorder/save`
-- `Y`：调用 `/recorder/discard`
+AG95 通信命令不按 500 Hz 运行。代码会把夹爪命令和读取频率限制到不超过 50 Hz。
 
-可以改按键：
+## 13. State file 格式
 
-```bash
-python3 src/teleop/teleop.py \
-  --enable-recorder-control \
-  --recorder-start-button A \
-  --recorder-stop-button B \
-  --recorder-save-button X \
-  --recorder-discard-button Y
-```
-
-按键触发使用上升沿和 debounce，不会因为长按反复调用 service。
-
-默认 home 位姿是当前采集流程使用的结束位：
-
-```text
-[-1.5708139578448694, -1.5707999668517054, -1.570805549621582,
- -1.570810934106344, 1.5707950592041016, -0.02949411073793584]
-```
-
-如果临时想恢复旧行为，让 `B` 直接 stop，不自动回位：
-
-```bash
-python3 src/teleop/teleop.py \
-  --enable-recorder-control \
-  --disable-return-home-before-stop
-```
-
-## 完整参数说明
-
-### 机械臂 RTDE 参数
-
-- `--robot-ip`：UR 控制器 IP，默认 `192.168.1.102`。
-- `--control-mode`：控制模式，默认 `servo_j`。
-  - `servo_j`：teleop 先根据目标 TCP 位姿做 IK，再用 `servoJ` 发送关节目标。推荐用于当前采集流程，关节 action 更稳定。
-  - `servo_l`：直接用 `servoL` 发送 TCP 位姿目标。TCP 跟随直观，但对轨迹连续性和奇异位姿更敏感。
-- `--rate-hz`：主控制循环频率，默认 `250 Hz`。值越高，轨迹越细，但对网络、Python 调度和 RTDE 稳定性要求越高。当前采集样例用 `300 Hz`。
-- `--max-velocity`：传给 UR `servoJ/servoL` 的速度参数，单位按 RTDE 接口定义。它不是最终运动速度上限，实际速度还会被 step 限幅影响。
-- `--max-acceleration`：传给 UR `servoJ/servoL` 的加速度参数，单位按 RTDE 接口定义。
-- `--lookahead-time`：UR servo 的前瞻时间，默认 `0.06 s`。大一些会更平滑、更慢一些；小一些响应更直接，但更容易抖。
-- `--servo-gain`：UR servo 增益，默认 `500`。大一些跟随更紧，小一些更柔和。当前采集样例用 `300`。
-
-### XR 输入和映射参数
-
-启动 Quest/PICO 客户端时，请先确认软件界面的正前方朝向机械臂正 X 方向，再开始按住 grip 建立遥操作参考点。
-
-- `--pose-source`：使用哪个 XR 位姿源，默认 `right_controller`。可选通常是 `right_controller`、`left_controller`、`headset`。
-- `--grip-name`：机械臂运动使能的模拟量，默认 `right_grip`。只有 grip 值超过阈值才移动机械臂。
-- `--trigger-name`：夹爪控制的模拟量，默认 `right_trigger`。松开为张开，越按越夹紧。
-- `--emergency-button`：急停 teleop 的按钮，默认 `right_axis_click`。
-- `--grip-threshold`：运动使能按下阈值，默认 `0.95`。如果手柄 grip 不容易按满，可以降低到 `0.7` 或 `0.8`。
-- `--grip-release-threshold`：运动使能释放阈值，默认比 `--grip-threshold` 低 `0.15`。例如 `--grip-threshold 0.8 --grip-release-threshold 0.55` 可以避免 grip 模拟量轻微抖动时反复 `servoStop()`。
-- `--xr-timeout-sec`：XR 数据超时时间，默认 `0.2 s`。超过这个时间没有新数据时，teleop 会停止继续发送运动目标。
-- `--scale-factor`：手柄平移到机器人 TCP 平移的比例，默认 `0.6`。例如 `0.8` 表示手柄移动 `10 cm`，目标 TCP 大约移动 `8 cm`。
-- `--rotation-scale`：手柄旋转到 TCP 旋转的比例，默认 `1.0`。设为 `0` 可以完全关闭手腕旋转，只保留平移。
-
-### 安全限幅参数
-
-- `--max-step-translation`：每个控制周期允许 TCP 目标最多平移多少，单位 `m`，默认 `0.01`。这是最直接的速度限制之一。样例 `0.002` 在 `300 Hz` 下理论上约等于 `0.6 m/s` 的目标变化上限，实际还会受 `--max-joint-step` 和 UR servo 参数限制。
-- `--max-step-rotation`：每个控制周期允许 TCP 目标最多旋转多少，单位 `rad`，默认 `0.05`。如果感觉末端翻转太快，优先降低它或降低 `--rotation-scale`。
-- `--max-joint-step`：每个控制周期允许单个关节目标最多变化多少，单位 `rad`，默认 `0.04`。这是 `servo_j` 下限制关节跳变的关键参数。样例 `0.003` 比较保守。
-- `--workspace-min x,y,z`：可选 TCP 工作空间下边界，单位 `m`，例如 `--workspace-min -0.5,-0.7,0.05`。
-- `--workspace-max x,y,z`：可选 TCP 工作空间上边界，单位 `m`，例如 `--workspace-max 0.5,-0.2,0.6`。
-
-### DH 夹爪参数
-
-- `--disable-gripper`：禁用夹爪，只控制机械臂。
-- `--gripper-port`：夹爪串口，默认 `/tmp/ttyUR`。当前链路里它来自 ToolComm Forwarder。
-- `--gripper-baudrate`：夹爪串口波特率，默认 `115200`。
-- `--gripper-rate-hz`：夹爪命令发送线程频率，默认 `30 Hz`。这个不用跟机械臂一样高。
-- `--gripper-speed`：DH 夹爪目标速度，范围 `1-100`，默认 `100`。
-- `--gripper-force`：DH 夹爪目标力，范围 `20-100`，默认 `50`。
-- `--gripper-open-raw`：张开位置原始值，默认 `1000`。
-- `--gripper-closed-raw`：夹住位置原始值，默认 `0`。
-- `--gripper-binary-control`：把 trigger 从连续控制改成二值控制。不开这个参数时，trigger 是连续数值。
-- `--gripper-trigger-threshold`：二值夹爪的触发阈值，默认 `0.5`。只在 `--gripper-binary-control` 开启时生效。
-- `--gripper-deadband`：夹爪目标变化死区，默认 `4`。目标 raw 变化小于这个值时不重复发命令，减少串口压力。
-- `--gripper-init-timeout-sec`：等待 DH 夹爪初始化完成的最长时间，默认 `8 s`。
-- `--gripper-read-hz`：读取夹爪当前位置的频率，默认 `5 Hz`。读取值会写入 state file，供 recorder 生成夹爪 observation/action。
-
-### State File 参数
-
-- `--disable-state-file`：不写 teleop action 状态文件。开启后 recorder 无法记录 teleop 的 action。
-- `--state-file`：teleop action 状态文件路径，默认 `/tmp/ur_teleop_state.json`。
-- `--state-hz`：写状态文件频率，默认 `30 Hz`。这不影响机械臂控制频率，只影响 recorder 能拿到 action 的刷新频率。
-
-### Recorder 控制参数
-
-- `--enable-recorder-control`：允许 teleop 用手柄按钮调用 recorder 的 ROS2 service。不开这个参数时，A/B/X/Y 不控制 recorder。
-- `--recorder-start-button`：开始录制按钮，默认 `A`。
-- `--recorder-stop-button`：停止录制按钮，默认 `B`。默认行为是先回 home，再 stop。
-- `--recorder-save-button`：保存 episode 按钮，默认 `X`。
-- `--recorder-discard-button`：丢弃 episode 按钮，默认 `Y`。
-- `--recorder-debounce-sec`：按钮防抖时间，默认 `0.5 s`，避免长按触发多次 service。
-
-### Stop 前自动回位参数
-
-- `--disable-return-home-before-stop`：关闭 stop 前自动回位。开启后，按 `B` 会直接请求 `/recorder/stop`。
-- `--return-home-joints q1,q2,q3,q4,q5,q6`：`B` 键 stop 前自动回到的 joint-space home 位姿，单位 `rad`。不传则使用代码里的默认采集结束位。
-- `--return-home-max-joint-step`：自动回位时每个控制周期允许单个关节最多变化多少，单位 `rad`，默认 `0.0006`。它只影响 B 键回 home，不影响正常遥操作的 `--max-joint-step`。当前采集样例用 `0.003`，和正常遥操作的 `--max-joint-step` 一致。
-- `--return-home-tolerance`：到位判断的最大关节误差，单位 `rad`，默认 `0.01`。
-- `--return-home-timeout-sec`：回位最长等待时间，默认 `20 s`。如果把 `--return-home-max-joint-step` 调得很小，建议设到 `30 s` 或更高；超时也会请求 recorder stop。
-- `--return-home-hold-sec`：到位后保持多久再 stop recorder，默认 `0.3 s`。这段保持也会继续被 recorder 记录。
-
-## 推荐样例
-
-当前建议先用下面这一组平稳采集参数。它的思路是：`servo_j` 直控，`100 Hz` 主循环，速度/加速度和单周期步长都压低，先保证方向、手感和数据质量稳定。
-
-```bash
-cd /home/ustc/UR
-source /home/ustc/anaconda3/etc/profile.d/conda.sh
-conda activate XRobo
-source /opt/ros/jazzy/setup.bash
-source /home/ustc/UR/install/setup.bash
-
-python3 src/teleop/teleop.py \
-  --robot-ip 192.168.1.102 \
-  --control-mode servo_j \
-  --rate-hz 300 \
-  --max-velocity 0.15 \
-  --max-acceleration 0.15 \
-  --lookahead-time 0.12 \
-  --servo-gain 300 \
-  --scale-factor 0.8 \
-  --rotation-scale 0.8 \
-  --max-step-translation 0.002 \
-  --max-step-rotation 0.005 \
-  --max-joint-step 0.003 \
-  --gripper-port /tmp/ttyUR \
-  --state-file /tmp/ur_teleop_state.json \
-  --enable-recorder-control \
-  --return-home-max-joint-step 0.003 \
-  --return-home-timeout-sec 30
-```
-
-如果只想做平移采集，不想让手腕姿态影响末端旋转，把 `--rotation-scale` 改成 `0`：
-
-```bash
-python3 src/teleop/teleop.py \
-  --robot-ip 192.168.1.102 \
-  --control-mode servo_j \
-  --rate-hz 300 \
-  --max-velocity 0.15 \
-  --max-acceleration 0.15 \
-  --lookahead-time 0.12 \
-  --servo-gain 300 \
-  --scale-factor 0.8 \
-  --rotation-scale 0 \
-  --max-step-translation 0.002 \
-  --max-step-rotation 0.005 \
-  --max-joint-step 0.003 \
-  --gripper-port /tmp/ttyUR \
-  --state-file /tmp/ur_teleop_state.json \
-  --enable-recorder-control \
-  --return-home-max-joint-step 0.003 \
-  --return-home-timeout-sec 30
-```
-
-## 与 recorder 的关系
-
-teleop 的 state file 包含：
+`teleop.py` 按 `--state-hz` 写出 JSON。recorder 用该文件生成 action，并优先使用其中的 actual state 作为 observation。
 
 ```json
 {
   "wall_time": 1710000000.123,
+  "status": "running",
+  "control_mode": "speed_j_dls",
   "gripper_target_raw": 450,
   "gripper_current_raw": 430,
-  "target_tcp_pose": [x, y, z, rx, ry, rz],
-  "target_q": [q0, q1, q2, q3, q4, q5]
+  "motion_grip_value": 0.97,
+  "motion_enabled": true,
+  "xr_age_sec": 0.0,
+  "actual_tcp_pose": [0, 0, 0, 0, 0, 0],
+  "actual_q": [0, 0, 0, 0, 0, 0],
+  "target_tcp_pose": [0, 0, 0, 0, 0, 0],
+  "target_q": [0, 0, 0, 0, 0, 0]
 }
 ```
 
-recorder 读取这个文件后生成最终训练数据：
+| 字段 | 作用 |
+| --- | --- |
+| `actual_q` | 实测关节角，作为 observation |
+| `actual_tcp_pose` | 实测 TCP pose，作为 observation |
+| `target_q` | 当前控制目标，作为 action |
+| `target_tcp_pose` | 当前 TCP 目标，作为 action |
+| `gripper_target_raw` | 夹爪控制目标 |
+| `gripper_current_raw` | 夹爪实测位置 |
 
-```json
-{
-  "frame_idx": 0,
-  "timestamp": 1710000000.123,
-  "observation": {
-    "joint_positions": [...],
-    "tcp_pose": [...],
-    "gripper_position": 0.43
-  },
-  "action": {
-    "joint_positions": [...],
-    "tcp_pose": [...],
-    "gripper_position": 0.45
-  }
-}
+## 14. 参数说明
+
+### 机械臂 RTDE
+
+| 参数 | 默认值 | 作用 |
+| --- | --- | --- |
+| `--robot-ip` | `192.168.1.102` | UR 控制器 IP |
+| `--ur-type` | `ur7e` | URDF/Jacobian 使用的机器人型号 |
+| `--control-mode` | `servo_j` | 控制模式：`speed_j_dls`、`servo_j`、`servo_l` |
+| `--rate-hz` | `500.0` | 主控制循环频率 |
+| `--max-velocity` | `0.5` | `servoJ/servoL` 速度参数 |
+| `--max-acceleration` | `1.0` | `servoJ/servoL` 加速度参数 |
+| `--lookahead-time` | `0.06` | UR servo lookahead time |
+| `--servo-gain` | `500.0` | UR servo gain |
+| `--speed-slider-fraction` | `1.0` | 启动 bridge 时设置 UR speed slider |
+| `--realtime-priority` | `0` | teleop 进程 SCHED_FIFO 优先级；`0` 表示关闭 |
+| `--lock-memory` | 关闭 | 使用 `mlockall` 锁住进程内存 |
+| `--control-latency-warning-sec` | `0.02` | 控制周期 gap warning 阈值 |
+| `--ik-max-position-error` | `1e-4` | `servo_j` IK 位置误差阈值 |
+| `--ik-max-orientation-error` | `1e-3` | `servo_j` IK 姿态误差阈值 |
+
+### SpeedJ bridge
+
+| 参数 | 默认值 | 作用 |
+| --- | --- | --- |
+| `--speedj-backend` | `direct` | `direct` 由 Python 发 `speedJ`；`register_bridge` 由机器人端 2 ms loop 执行 |
+| `--speedj-register-start` | `42` | RTDE input integer register 起点 |
+| `--speedj-velocity-scale` | `10000.0` | 速度写入 integer register 的缩放 |
+| `--speedj-watchdog-sec` | `0.06` | bridge 短时无命令时进入零速度 |
+| `--speedj-stale-stop-sec` | `1.0` | bridge 长时间无命令时退出脚本 |
+| `--speedj-upload-port` | `30001` | 上传 URScript 的端口 |
+
+### DLS 速度 IK
+
+| 参数 | 默认值 | 作用 |
+| --- | --- | --- |
+| `--dls-linear-gain` | `8.0` | TCP 平移误差到线速度的比例 |
+| `--dls-angular-gain` | `6.0` | TCP 姿态误差到角速度的比例 |
+| `--dls-damping` | `0.03` | DLS 基础阻尼 |
+| `--dls-max-damping` | `0.25` | 接近奇异点时的最大阻尼 |
+| `--dls-position-deadband` | `0.0` | TCP 平移误差死区 |
+| `--dls-orientation-deadband` | `0.0` | TCP 姿态误差死区 |
+| `--dls-singularity-threshold` | `0.05` | 最小奇异值低于该值时开始降速 |
+| `--dls-hard-stop-threshold` | `0.015` | 最小奇异值低于该值时硬停 |
+| `--dls-frame-name` | `tool0` | 本地 Jacobian 末端 frame |
+| `--dls-jacobian-source` | `local` | Jacobian 来源：`local` 或 `rtde` |
+| `--ur-description-path` | `None` | 自定义 `ur_description` 路径 |
+| `--max-tcp-linear-speed` | `0.25` | DLS 输入 TCP 平移速度上限 |
+| `--max-tcp-angular-speed` | `0.8` | DLS 输入 TCP 角速度上限 |
+| `--max-joint-speed` | `0.8` | 输出关节速度上限 |
+| `--max-joint-acceleration` | `2.0` | 输出关节加速度上限 |
+
+### XR 输入
+
+| 参数 | 默认值 | 作用 |
+| --- | --- | --- |
+| `--pose-source` | `right_controller` | XR 位姿源 |
+| `--grip-name` | `right_grip` | 机械臂运动使能输入 |
+| `--trigger-name` | `right_trigger` | 夹爪控制输入 |
+| `--emergency-button` | `right_axis_click` | 急停按钮 |
+| `--xr-service-realtime-priority` | `0` | XR service SCHED_FIFO 优先级 |
+| `--grip-threshold` | `0.95` | grip 进入运动的阈值 |
+| `--grip-release-threshold` | `None` | grip 释放阈值；为空时自动低于 start threshold |
+| `--grip-release-grace-sec` | `0.0` | grip 短暂抖动的宽限时间 |
+| `--xr-timeout-sec` | `0.2` | XR 数据超时停止阈值 |
+| `--xr-target-interpolation-sec` | `0.0` | XR 短 gap 外推时间 |
+| `--scale-factor` | `0.6` | 手柄平移缩放 |
+| `--rotation-scale` | `1.0` | 手柄旋转缩放 |
+
+### 安全限幅与平滑
+
+| 参数 | 默认值 | 作用 |
+| --- | --- | --- |
+| `--max-step-translation` | `0.01` | 每周期 TCP 目标最大平移 |
+| `--max-step-rotation` | `0.05` | 每周期 TCP 目标最大旋转 |
+| `--max-joint-step` | `0.04` | `servo_j` 每周期最大关节步长 |
+| `--unsafe-disable-teleop-safety-limits` | 关闭 | 禁用 Python 侧限速、平滑、workspace clamp 和 lag limit |
+| `--target-smoothing-mode` | `linear` | 目标重采样方式：`none`、`linear`、`ruckig` |
+| `--target-smoothing-sec` | `0.0` | `linear` 平滑窗口 |
+| `--ruckig-max-linear-acceleration` | `1.5` | Ruckig 平移加速度上限 |
+| `--ruckig-max-linear-jerk` | `30.0` | Ruckig 平移 jerk 上限 |
+| `--ruckig-target-prediction-sec` | `0.006` | Ruckig 目标短预测时间 |
+| `--ruckig-velocity-hold-sec` | `0.015` | XR 时间戳停顿时保留最近速度的时间 |
+| `--max-target-lag-translation` | `0.0` | 目标 TCP 最多领先当前 TCP 的平移距离 |
+| `--max-target-lag-rotation` | `0.0` | 目标 TCP 最多领先当前 TCP 的旋转距离 |
+| `--workspace-min` | `None` | TCP workspace 下界，格式 `x,y,z` |
+| `--workspace-max` | `None` | TCP workspace 上界，格式 `x,y,z` |
+
+### DH 夹爪
+
+| 参数 | 默认值 | 作用 |
+| --- | --- | --- |
+| `--disable-gripper` | 关闭 | 禁用夹爪 |
+| `--gripper-port` | `/tmp/ttyUR` | 夹爪串口 |
+| `--gripper-baudrate` | `115200` | 串口波特率 |
+| `--gripper-rate-hz` | `30.0` | 命令线程频率 |
+| `--gripper-speed` | `100` | DH 目标速度 |
+| `--gripper-force` | `50` | DH 目标力 |
+| `--gripper-open-raw` | `1000` | 张开 raw 值 |
+| `--gripper-closed-raw` | `0` | 闭合 raw 值 |
+| `--gripper-binary-control` | 关闭 | trigger 二值控制 |
+| `--gripper-trigger-threshold` | `0.5` | 二值控制触发阈值 |
+| `--gripper-deadband` | `4` | raw 目标变化死区 |
+| `--gripper-init-timeout-sec` | `8.0` | 初始化超时 |
+| `--gripper-read-hz` | `30.0` | 当前位置读取频率 |
+
+### State file
+
+| 参数 | 默认值 | 作用 |
+| --- | --- | --- |
+| `--disable-state-file` | 关闭 | 禁止写 state file |
+| `--state-file` | `/tmp/ur_teleop_state.json` | state file 路径 |
+| `--state-hz` | `30.0` | state file 写入频率 |
+
+### Recorder 控制
+
+| 参数 | 默认值 | 作用 |
+| --- | --- | --- |
+| `--enable-recorder-control` | 关闭 | XR 按键控制 recorder service |
+| `--recorder-start-button` | `A` | 开始录制按钮 |
+| `--recorder-stop-button` | `B` | 停止录制按钮 |
+| `--recorder-save-button` | `X` | 保存按钮 |
+| `--recorder-discard-button` | `Y` | 丢弃按钮 |
+| `--recorder-debounce-sec` | `0.5` | recorder 按键防抖 |
+
+### 回 home 和 replay
+
+| 参数 | 默认值 | 作用 |
+| --- | --- | --- |
+| `--disable-return-home-before-stop` | 关闭 | `B` 直接 stop，不自动回 home |
+| `--return-home-joints` | 代码默认采集结束位 | home 关节角，格式 `q1,q2,q3,q4,q5,q6` |
+| `--return-home-max-joint-step` | `0.0006` | 回 home 每周期最大关节步长 |
+| `--return-home-tolerance` | `0.01` | home 到位关节误差阈值 |
+| `--return-home-timeout-sec` | `20.0` | 回 home 超时 |
+| `--return-home-hold-sec` | `0.3` | 到位后保持时间 |
+| `--return-home-stop-grace-sec` | `0.2` | 写最后 state 后再 stop recorder 的等待时间 |
+| `--replay-after-return-home` | 关闭 | 回 home 后加载本 episode sampled replay |
+| `--replay-button` | `left_grip` | replay 触发输入 |
+| `--replay-trigger-threshold` | `0.8` | replay 模拟量触发阈值 |
+| `--replay-delay-sec` | `2.0` | 触发后延迟执行 replay |
+| `--replay-record-hz` | `30.0` | 历史兼容参数；实际跟随 recorder sampled replay |
+| `--replay-speed-scale` | `1.0` | replay 时间缩放 |
+| `--replay-joint-gain` | `10.0` | replay 关节误差速度增益 |
+| `--replay-tolerance` | `0.02` | replay 终点误差阈值 |
+
+## 15. 与 recorder 的同步规则
+
+recorder 按 `record_hz` 读取 `teleop_state_file`。推荐配置：
+
+```text
+teleop --state-hz 30
+teleop --gripper-read-hz 30
+recorder record_hz:=30.0
+recorder color_fps:=30
 ```
 
-如果 state file 不存在、不新鲜，或者缺少 `target_q/target_tcp_pose`，recorder 会跳过该帧，避免把无效 action 写进数据集。
+action 语义保持为控制目标。夹爪 `gripper_target_raw` 不改写为下一帧 observation。
 
-## 常见问题
+## 16. 故障处理
 
-`xrobotoolkit_sdk is not importable`：先 `conda activate XRobo`，再用 `python -c "import xrobotoolkit_sdk"` 检查。
+| 现象 | 检查项 |
+| --- | --- |
+| `xr_timeout` | XR 客户端、PC Service、无线链路、`--xr-timeout-sec` |
+| 机械臂不动 | remote control、上电、刹车、speed slider、旧 RTDE 进程 |
+| 夹爪不可用 | ToolComm、`/tmp/ttyUR`、串口占用 |
+| recorder 没有 action | `--state-file` 路径、`--state-hz`、是否按住 grip |
+| 500 Hz 下抖动 | lowlatency kernel、实时优先级、CPU governor、网络 |
+| Ruckig import 失败 | 在 `XRobo` 环境安装 `ruckig` |
 
-`xrt.init()` 能运行但时间戳一直是 `0`：PC Service 通了，但 XR 客户端还没有连接或没有数据流。打开头显端 XRoboToolkit 客户端并连接 PC。
-
-`RoboticsServiceProcess` 不存在：运行 `/opt/apps/roboticsservice/runService.sh` 启动 PC Service。
-
-`/tmp/ttyUR` 不存在：先运行 ToolComm Forwarder 的 PC 端脚本，并确认机器人端 URCap 已启动。
-
-夹爪控制异常：确认没有同时运行 ROS2 `gripper` 节点，因为它也会占用 `/tmp/ttyUR`。
-
-recorder 按键无反应：确认 recorder 已启动，且 teleop 启动时加了 `--enable-recorder-control`。
+```bash
+python3 -m pip install ruckig
+python3 -c "import ruckig; print(ruckig.__version__)"
+```

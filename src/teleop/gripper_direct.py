@@ -17,6 +17,7 @@ class DirectDHGripper:
     MAX_SPEED = 100
     MIN_POSITION = 0
     MAX_POSITION = 1000
+    MAX_COMMUNICATION_HZ = 50.0
 
     def __init__(
         self,
@@ -33,12 +34,14 @@ class DirectDHGripper:
 
         self.port = port
         self.baudrate = int(baudrate)
-        self.period_sec = 1.0 / max(float(rate_hz), 1.0)
+        command_hz = self._safe_communication_hz(rate_hz, min_hz=1.0)
+        read_hz = self._safe_communication_hz(read_state_hz, min_hz=0.1)
+        self.period_sec = 1.0 / command_hz
         self.speed = self._clamp(speed, self.MIN_SPEED, self.MAX_SPEED)
         self.force = self._clamp(force, self.MIN_FORCE, self.MAX_FORCE)
         self.position_deadband = max(0, int(position_deadband))
         self.init_timeout_sec = float(init_timeout_sec)
-        self.read_state_period_sec = 1.0 / max(float(read_state_hz), 0.1)
+        self.read_state_period_sec = 1.0 / read_hz
         self._gripper = dh_modbus_gripper.dh_modbus_gripper()
         self._target_lock = threading.Lock()
         self._target_raw = self.MIN_POSITION
@@ -52,6 +55,14 @@ class DirectDHGripper:
     @staticmethod
     def _clamp(value, min_value, max_value) -> int:
         return max(min_value, min(int(round(value)), max_value))
+
+    @classmethod
+    def _safe_communication_hz(cls, value, min_hz: float) -> float:
+        try:
+            hz = float(value)
+        except (TypeError, ValueError):
+            hz = min_hz
+        return min(max(hz, min_hz), cls.MAX_COMMUNICATION_HZ)
 
     def start(self):
         if self._thread is not None:
