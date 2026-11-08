@@ -264,6 +264,7 @@ class DirectRTDEJointServoClient:
         wait_for_result: bool = True,
         wait_callback=None,
         wait_poll_sec: float = 0.1,
+        abort_event: threading.Event | None = None,
     ) -> tuple[bool, str]:
         del wait_for_result
         try:
@@ -290,7 +291,7 @@ class DirectRTDEJointServoClient:
         started = time.monotonic()
         servo_samples = 0
         try:
-            servo_samples = self._stream_servoj(points)
+            servo_samples = self._stream_servoj(points, abort_event)
         except Exception as exc:
             self.stop()
             return False, f"direct RTDE servoJ failed: {exc}"
@@ -300,6 +301,11 @@ class DirectRTDEJointServoClient:
                 capture_thread.join(timeout=1.0)
             self._execute_lock.release()
 
+        if abort_event is not None and abort_event.is_set():
+            return (
+                False,
+                f"direct RTDE servoJ stopped by request after {servo_samples} servo samples",
+            )
         elapsed = time.monotonic() - started
         horizon_sec = points[-1][2] if points else 0.0
         return (
@@ -412,7 +418,11 @@ class DirectRTDEJointServoClient:
             previous_time = point_time
         return points
 
-    def _stream_servoj(self, points: list[tuple[np.ndarray, float, float]]) -> int:
+    def _stream_servoj(
+        self,
+        points: list[tuple[np.ndarray, float, float]],
+        abort_event: threading.Event | None = None,
+    ) -> int:
         if self._rtde_c is None:
             raise RuntimeError("RTDE control interface is not connected")
         running_q = self._current_joints()
@@ -444,6 +454,8 @@ class DirectRTDEJointServoClient:
 
         servo_samples = 0
         for sample_time, interpolated_q in zip(sample_times, target_samples):
+            if abort_event is not None and abort_event.is_set():
+                break
             gripper_index = int(np.searchsorted(point_times, sample_time, side="left"))
             gripper_index = min(gripper_index, len(grippers) - 1)
             if gripper_index != last_gripper_index:

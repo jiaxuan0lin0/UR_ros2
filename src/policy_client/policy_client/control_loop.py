@@ -28,6 +28,8 @@ class ControlLoopMixin:
             response.success = False
             response.message = 'policy control loop is already running'
             return response
+        # A stop issued before this step must not cancel it.
+        self._stop_event.clear()
 
         try:
             ok, message = self._check_controller_ready()

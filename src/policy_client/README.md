@@ -175,7 +175,7 @@ The launch file also fixes `controller_mode=rtde_servoj_joint_abs`, `joint_comma
 | --- | --- |
 | `/policy_control/start` | Requires `instruction`. Connects RTDE control (skipped in dry run), calls `/health` and connects RTDE receive and cameras (first time only), resets the policy and RTC, then starts the loop |
 | `/policy_control/step` | Connects like `start` (but does not check `instruction`), resets the policy history (default), runs one chunk and returns when it has finished. Refused while the loop runs |
-| `/policy_control/stop` | Sets the stop flag, waits up to 2 s for the loop thread, drops any pending prefetch and calls `servoStop()`. A step already in progress is not interrupted (see [Safety notes](#safety-notes)). Returns `success=false` if the loop was not running |
+| `/policy_control/stop` | Sets the stop flag, which ends the servoJ stream of a running chunk at the next 2 ms sample and discards any chunk still waiting for inference. Then waits up to 2 s for the loop thread, drops any pending prefetch and calls `servoStop()`. Returns `success=false` if the loop was not running |
 | `/policy_control/reset_policy` | Drops any pending prefetch, calls `POST /reset` and resets RTC and history |
 
 HTTP API (JSON over `requests`; `HTTP(S)_PROXY` variables are ignored):
@@ -193,7 +193,7 @@ A non-2xx status, a non-JSON body or a non-object body fails the step. An `error
 - **One control entry at a time.** RTDE control conflicts with `teleop`, `ur_robot_driver`/`controllers` and a second `policy_client`. Only one process may use `/tmp/ttyUR`.
 - **Dry run first.** `dry_run:=true` never sends `servoJ` commands, but it still connects RTDE receive and the cameras. With `direct_gripper:=true` the gripper is opened and initialized at startup, and DH initialization moves the fingers. Use `direct_gripper:=false` for a fully passive check.
 - **Limited checks only.** Actions are executed as absolute joint targets after shape and finiteness checks. There is no joint-limit or workspace check. Motion is bounded only by `max_joint_delta` and the `servoJ` settings; keep the defaults until a policy is trusted.
-- **Stop is not an emergency stop.** `/policy_control/stop` does not interrupt a step in progress. A chunk being streamed runs to completion. If the loop is waiting for an inference result when stop is called, the service returns after its 2 s wait, and the chunk is still executed once the result arrives. Keep the pendant e-stop within reach.
+- **Stop is not an emergency stop.** `/policy_control/stop` ends the loop's current chunk within one servo sample and keeps a chunk that arrives later from running, then calls `servoStop()`. A single `/policy_control/step` call is not interrupted: the services share one callback group, so stop runs only after the step returns. Keep the pendant e-stop within reach.
 - **Use `step` before `start`.** `autostart` defaults to `false`.
 
 ## Troubleshooting

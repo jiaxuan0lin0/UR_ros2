@@ -254,6 +254,8 @@ class PolicyControlNode(
         self.get_logger().info(f'{action_summary}, inference={infer_note}')
         if self.dry_run:
             return True, f'dry-run {action_summary}'
+        if self._stop_event.is_set():
+            return False, 'stop requested; policy actions not executed'
 
         goal = self.action_adapter.build_goal(
             safe_actions,
@@ -279,6 +281,7 @@ class PolicyControlNode(
             if (
                 self.async_policy
                 and not prefetch_started
+                and not self._stop_event.is_set()
                 and len(execution_observations)
                 >= self.async_policy_prefetch_after_frames
             ):
@@ -296,6 +299,7 @@ class PolicyControlNode(
                 else None
             ),
             wait_poll_sec=1.0 / max(self.history_capture_hz, 1.0),
+            abort_event=self._stop_event,
         )
         if ok and self.wait_for_controller_result:
             final_observation = self._read_optional_observation()
