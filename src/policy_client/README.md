@@ -6,6 +6,8 @@ The node reads RealSense images and the UR state over RTDE, sends them to a poli
 
 For workspace setup and build, see the [top-level README](../../README.md).
 
+`node.py` wires the node together and runs one control step. Parameters, the start/stop loop, async inference and execution history live in the mixins `node_parameters.py`, `control_loop.py`, `async_policy.py` and `execution_history.py`; log formatting is in `step_summary.py`. The DH gripper driver comes from the `controllers` package, so build that package too (a full `colcon build` does).
+
 ## How it works
 
 ```text

@@ -32,7 +32,7 @@ class DirectDHGripper:
         init_timeout_sec: float,
         read_state_hz: float,
     ):
-        from policy_client.dh_gripper import dh_modbus_gripper
+        from controllers.dh_gripper import dh_modbus_gripper
 
         self.node = node
         self.port = str(port)
