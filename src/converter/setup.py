@@ -13,10 +13,10 @@ setup(
     ],
     install_requires=['setuptools'],
     zip_safe=True,
-    maintainer='ustc',
-    maintainer_email='1702455846@qq.com',
-    description='TODO: Package description',
-    license='TODO: License declaration',
+    maintainer='Jiaxuan Lin',
+    maintainer_email='jiaxuan0lin0@gmail.com',
+    description='Converts recorded UR episodes into an RLDS (TFDS) dataset.',
+    license='Apache-2.0',
     extras_require={
         'test': [
             'pytest',

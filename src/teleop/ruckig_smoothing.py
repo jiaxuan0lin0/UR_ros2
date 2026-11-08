@@ -20,9 +20,8 @@ class RuckigPositionSmoother:
         except ImportError as exc:
             raise RuntimeError(
                 "Ruckig target smoothing requires the Python package 'ruckig'. "
-                "Install it in the teleop environment with: "
-                "source /home/ustc/anaconda3/etc/profile.d/conda.sh && "
-                "conda activate XRobo && python3 -m pip install ruckig"
+                "Install it in the teleop Python environment with: "
+                "python3 -m pip install ruckig"
             ) from exc
 
         self.ruckig = ruckig

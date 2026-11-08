@@ -1,79 +1,67 @@
-# UR7e 机器人工作区说明
+# UR_ros2
 
-本工作区包含 UR7e 遥操作、数据采集、数据转换、传统 ROS2 控制封装和 policy 部署工具。每个包的详细命令和参数见对应 README。
+![ROS 2](https://img.shields.io/badge/ROS%202-Jazzy-22314E)
+![Robot](https://img.shields.io/badge/Robot-UR7e-1f6feb)
+![License](https://img.shields.io/badge/License-Apache--2.0-blue)
 
-## 1. 包目录
+A ROS 2 Jazzy workspace for collecting demonstrations and deploying learned policies on a
+Universal Robots **UR7e** arm with a DH parallel gripper. It covers the full real-robot loop:
 
-| 路径 | 用途 |
+1. **Teleoperate** the arm from an XR headset over RTDE at 500 Hz.
+2. **Record** synchronized camera images, robot state, and teleop actions as episodes.
+3. **Convert** the episodes to RLDS (TFDS) for vision-language-action (VLA) training.
+4. **Deploy** a trained policy served over HTTP and execute its action chunks with RTDE `servoJ`.
+
+```mermaid
+flowchart LR
+    XR["XR headset<br/>(XRoboToolkit)"] --> Teleop["teleop<br/>RTDE 500 Hz"]
+    Teleop -->|joint commands| UR["UR7e + DH gripper"]
+    Teleop -->|state file + recorder control| Recorder["recorder<br/>cameras + robot state"]
+    UR -->|RTDE state| Recorder
+    Recorder -->|episodes| Converter["converter<br/>RLDS / TFDS"]
+    Converter --> Train["VLA training<br/>(outside this repo)"]
+    Server["policy server<br/>(HTTP)"] <-->|observation / action chunk| Client["policy_client"]
+    Client -->|RTDE servoJ| UR
+```
+
+## Packages
+
+| Package | What it does |
 | --- | --- |
-| [src/teleop](src/teleop/README.md) | XR 遥操作，RTDE 直接控制机械臂，DH 夹爪直连控制 |
-| [src/recorder](src/recorder/README.md) | 同步采集相机、机械臂 observation 和 teleop action |
-| [src/converter](src/converter/README.md) | 将 recorder episode 转换为 TFDS/RLDS |
-| [src/policy_client](src/policy_client/README.md) | 机器人侧 policy 推理部署与 500 Hz RTDE 执行 |
-| [src/controllers](src/controllers/README.md) | 传统 ROS2 action/topic 控制封装 |
+| [`teleop`](src/teleop/README.md) | XR teleoperation that drives the arm directly through RTDE (no ROS driver in the loop) and the gripper through the UR tool-communication port. Also starts/stops recording from the controller buttons. |
+| [`recorder`](src/recorder/README.md) | ROS 2 node that samples cameras, robot state, and the teleop action stream at a fixed rate and writes one directory per episode. |
+| [`converter`](src/converter/README.md) | Script that turns recorded episodes into an RLDS dataset readable with `tensorflow_datasets`. |
+| [`policy_client`](src/policy_client/README.md) | Robot-side deployment node: builds observations, queries a policy server over HTTP, and executes the returned joint-space action chunks with RTDE `servoJ`. Model-specific notes live in [`adapters/`](src/policy_client/adapters/README.md). |
+| [`controllers`](src/controllers/README.md) | Classic ROS 2 action/topic wrappers around `ur_robot_driver` and the gripper, for debugging or for integrations that need ROS interfaces. |
+| `controllers_msgs` | Message and action definitions used by `controllers` (documented in the `controllers` README). |
 
-## 2. 工作站登录
+## Requirements
 
-### 通用命令
+**Hardware**
 
-```bash
-ssh <ROBOT_USER>@<ROBOT_HOST> -p <SSH_PORT>
-cd <UR_WORKSPACE>
-```
+- Universal Robots UR7e in *Remote Control* mode, reachable from the workstation over Ethernet.
+- DH gripper on the UR tool flange, accessed through the UR tool-communication serial port
+  (the ToolComm Forwarder URCap must be running on the robot; default port 54321).
+- Intel RealSense cameras (a primary view and an optional wrist view).
+- An XR headset supported by [XRoboToolkit](https://github.com/XR-Robotics), with the XRoboToolkit PC Service installed on the workstation.
 
-### 示例
+**Software**
 
-```bash
-ssh <SSH_USER>@<WORKSTATION_HOST> -p <SSH_PORT>
-cd /data/jiaxuanLin/UR
-```
+- Ubuntu with ROS 2 Jazzy, `ur_robot_driver`, and `ur_client_library`.
+- Python packages, per component:
 
-## 3. 推荐工作流
+| Component | Python packages |
+| --- | --- |
+| `teleop` | `ur_rtde`, `xrobotoolkit_sdk`, `pinocchio`, `xacro`, `numpy`; `ruckig` (optional target smoothing) |
+| `recorder` | `ur_rtde`, `pyrealsense2`, `opencv-python`, `numpy` |
+| `converter` | `tensorflow`, `tensorflow_datasets`, `numpy` |
+| `policy_client` | `ur_rtde`, `pyrealsense2`, `requests`, `pyserial`, `numpy` |
+| `controllers` | `pyserial` |
 
-### 数据采集
+`teleop` is usually run from a separate Python environment that provides `xrobotoolkit_sdk`, and
+`recorder` can run under a virtual environment passed through its `python_executable` launch argument.
 
-1. 启动 XRoboToolkit PC Service。
-2. 启动 UR 机器人并创建 `/tmp/ttyUR`。
-3. 启动 `teleop.py`。
-4. 启动 `recorder`。
-5. 使用 XR 手柄控制录制 start/stop/save/discard。
-
-详细说明：
-
-```text
-src/teleop/README.md
-src/recorder/README.md
-```
-
-### 数据转换
-
-1. 检查 recorder episode。
-2. 转换为 RLDS。
-3. 用 TFDS 读取验证。
-
-详细说明：
-
-```text
-src/converter/README.md
-```
-
-### Policy 部署
-
-1. 启动具体 policy server。
-2. 通过 adapter 暴露统一 7D action contract。
-3. 启动 `policy_client`。
-4. 使用 `/policy_control/start` 或 `/policy_control/step` 执行。
-
-详细说明：
-
-```text
-src/policy_client/README.md
-src/policy_client/adapters/README.md
-```
-
-## 4. 构建
-
-### 通用命令
+## Build
 
 ```bash
 cd <UR_WORKSPACE>
@@ -82,24 +70,95 @@ colcon build --symlink-install
 source install/setup.bash
 ```
 
-### 示例
+`<UR_WORKSPACE>` is the root of this repository. Placeholders such as `<ROBOT_IP>` are used throughout the docs.
+
+## Workflows
+
+### Collect demonstrations
+
+Run each step in its own terminal, after sourcing ROS 2 and `install/setup.bash`.
 
 ```bash
-cd /data/jiaxuanLin/UR
-source /opt/ros/jazzy/setup.bash
-colcon build --symlink-install
-source install/setup.bash
+# 1. Start the XRoboToolkit PC Service with real-time priority (once per boot).
+src/teleop/start_xr_service_rt.sh
+
+# 2. Power on the arm and release the brakes through the UR Dashboard Server.
+#    The teach pendant must be in Remote Control mode.
+python3 src/teleop/start_ur.py --robot-ip <ROBOT_IP>
+
+# 3. Expose the gripper serial port as /tmp/ttyUR.
+python3 /opt/ros/jazzy/lib/ur_client_library/tool_communication.py <ROBOT_IP> --device-name /tmp/ttyUR
+
+# 4. Start teleoperation (in the Python environment that provides xrobotoolkit_sdk).
+python3 src/teleop/teleop.py --robot-ip <ROBOT_IP> --ur-type ur7e --enable-recorder-control
+
+# 5. Start the recorder.
+ros2 launch recorder record.launch.py robot_ip:=<ROBOT_IP> dataset_root:=<DATASET_DIR>
 ```
 
-## 5. 控制入口互斥规则
+With `--enable-recorder-control`, the XR controller buttons start, stop, save, and discard episodes.
+The full recommended teleop command, the button map, and keyboard or service alternatives are in the
+[`teleop`](src/teleop/README.md) and [`recorder`](src/recorder/README.md) READMEs.
 
-同一时间只能使用一个机械臂控制入口。
+### Convert to RLDS
 
-| 控制入口 | 是否推荐用于采集 | 说明 |
+```bash
+python3 src/converter/scripts/RLDS.py \
+  --dataset-root <DATASET_DIR> \
+  --output-dir <RLDS_DIR> \
+  --language-instruction "<TASK_INSTRUCTION>"
+```
+
+### Deploy a policy
+
+Start a policy server that implements the HTTP contract described in
+[`policy_client`](src/policy_client/README.md), make it reachable from the robot workstation
+(for example through an SSH tunnel), then:
+
+```bash
+ros2 launch policy_client policy_joint_abs_control.launch.py \
+  robot_ip:=<ROBOT_IP> \
+  policy_base_url:=http://127.0.0.1:<POLICY_PORT> \
+  instruction:="<TASK_INSTRUCTION>" \
+  dry_run:=true
+```
+
+Start with `dry_run:=true` to check observations and actions without moving the arm.
+
+### Alternative: ROS 2 driver and controllers
+
+When ROS interfaces (actions, MoveIt) are needed, run `ur_robot_driver` with tool communication enabled
+and the wrappers from [`controllers`](src/controllers/README.md) instead of the direct RTDE path.
+
+## One control entry at a time
+
+Only one program may command the arm, and only one process may own `/tmp/ttyUR`, at any moment.
+
+| Control entry | Use it for | Do not run together with |
 | --- | --- | --- |
-| `src/teleop/teleop.py` | 推荐 | XR 遥操作采集主链路 |
-| `src/policy_client` | 推荐 | policy 部署主链路 |
-| `src/controllers` | 调试/兼容 | ROS2 action/topic 控制封装 |
-| `ur_robot_driver` + MoveIt Servo | 仅特定调试 | 不与 direct RTDE teleop/policy 同时运行 |
+| `teleop/teleop.py` | Data collection | `policy_client`, `ur_robot_driver` |
+| `policy_client` | Policy evaluation | `teleop.py`, `ur_robot_driver` |
+| `controllers` + `ur_robot_driver` | Debugging and ROS integrations | `teleop.py`, `policy_client`, a separate `tool_communication.py` |
 
-`/tmp/ttyUR` 同一时间只能被一个夹爪控制进程占用。
+## Safety
+
+- Keep the emergency stop within reach and clear the workspace before enabling motion.
+- Unlock a protective stop (`start_ur.py --unlock-protective-stop`) only after checking the cell.
+- Test new policies with `dry_run:=true` and conservative speed limits first.
+
+## Repository layout
+
+```text
+UR_ros2/
+└── src/
+    ├── teleop/            # XR teleoperation over RTDE
+    ├── recorder/          # Episode recorder (ROS 2)
+    ├── converter/         # Episodes → RLDS
+    ├── policy_client/     # Policy deployment node and model adapters
+    ├── controllers/       # ROS 2 control wrappers
+    └── controllers_msgs/  # Interfaces for controllers
+```
+
+## License
+
+[Apache License 2.0](LICENSE).

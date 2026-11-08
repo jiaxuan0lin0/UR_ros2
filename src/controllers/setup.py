@@ -18,7 +18,7 @@ setup(
     zip_safe=True,
     maintainer='JiaxuanLin',
     maintainer_email='jiaxuan0lin0@gmail.com',
-    description='controller for UR and AG controller',
+    description='ROS 2 action and topic wrappers for the UR arm and DH gripper.',
     license='Apache-2.0',
     extras_require={
         'test': [
