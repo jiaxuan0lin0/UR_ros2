@@ -15,6 +15,7 @@ dataset/
 *.bag
 *.db3
 *.mcap
+*.log
 
 # Local editor / tool state
 .vscode/

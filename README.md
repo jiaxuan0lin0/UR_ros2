@@ -24,11 +24,11 @@ flowchart LR
     Client -->|RTDE servoJ| UR
 ```
 
-## Packages
+## Components
 
-| Package | What it does |
+| Component | What it does |
 | --- | --- |
-| [`teleop`](src/teleop/README.md) | XR teleoperation that drives the arm directly through RTDE (no ROS driver in the loop) and the gripper through the UR tool-communication port. Also starts/stops recording from the controller buttons. |
+| [`teleop`](src/teleop/README.md) | XR teleoperation scripts (not a colcon package) that drive the arm directly through RTDE (no ROS driver in the loop) and the gripper through the UR tool-communication port. Also starts/stops recording from the controller buttons. |
 | [`recorder`](src/recorder/README.md) | ROS 2 node that samples cameras, robot state, and the teleop action stream at a fixed rate and writes one directory per episode. |
 | [`converter`](src/converter/README.md) | Script that turns recorded episodes into an RLDS dataset readable with `tensorflow_datasets`. |
 | [`policy_client`](src/policy_client/README.md) | Robot-side deployment node: builds observations, queries a policy server over HTTP, and executes the returned joint-space action chunks with RTDE `servoJ`. Model-specific notes live in [`adapters/`](src/policy_client/adapters/README.md). |
@@ -52,14 +52,15 @@ flowchart LR
 
 | Component | Python packages |
 | --- | --- |
-| `teleop` | `ur_rtde`, `xrobotoolkit_sdk`, `pinocchio`, `xacro`, `numpy`; `ruckig` (optional target smoothing) |
+| `teleop` | `ur_rtde`, `xrobotoolkit_sdk`, `pinocchio`, `xacro`, `pyserial`, `numpy`; `ruckig` (optional target smoothing) |
 | `recorder` | `ur_rtde`, `pyrealsense2`, `opencv-python`, `numpy` |
-| `converter` | `tensorflow`, `tensorflow_datasets`, `numpy` |
+| `converter` | `tensorflow`, `tensorflow-datasets` (in a separate virtual environment, without ROS sourced) |
 | `policy_client` | `ur_rtde`, `pyrealsense2`, `requests`, `pyserial`, `numpy` |
 | `controllers` | `pyserial` |
 
-`teleop` is usually run from a separate Python environment that provides `xrobotoolkit_sdk`, and
-`recorder` can run under a virtual environment passed through its `python_executable` launch argument.
+`teleop` is usually run from a separate Python environment that provides `xrobotoolkit_sdk`.
+`recorder` runs under the active virtual environment, or the interpreter passed as its
+`python_executable` launch argument; it imports `ur_rtde` even when it does not open its own RTDE connection.
 
 ## Build
 
@@ -90,10 +91,11 @@ python3 src/teleop/start_ur.py --robot-ip <ROBOT_IP>
 python3 /opt/ros/jazzy/lib/ur_client_library/tool_communication.py <ROBOT_IP> --device-name /tmp/ttyUR
 
 # 4. Start teleoperation (in the Python environment that provides xrobotoolkit_sdk).
-python3 src/teleop/teleop.py --robot-ip <ROBOT_IP> --ur-type ur7e --enable-recorder-control
+python3 src/teleop/teleop.py --robot-ip <ROBOT_IP> --ur-type ur7e \
+  --control-mode speed_j_dls --enable-recorder-control
 
-# 5. Start the recorder.
-ros2 launch recorder record.launch.py robot_ip:=<ROBOT_IP> dataset_root:=<DATASET_DIR>
+# 5. Start the recorder (in the Python environment that provides pyrealsense2 and ur_rtde).
+ros2 launch recorder record.launch.py dataset_root:=<DATASET_DIR>
 ```
 
 With `--enable-recorder-control`, the XR controller buttons start, stop, save, and discard episodes.
@@ -102,12 +104,24 @@ The full recommended teleop command, the button map, and keyboard or service alt
 
 ### Convert to RLDS
 
+Run the converter from the source tree, in its own virtual environment with TensorFlow and
+TensorFlow Datasets, in a shell where ROS is not sourced (setup in the
+[`converter`](src/converter/README.md) README).
+
 ```bash
-python3 src/converter/scripts/RLDS.py \
+# Validate every episode and print a summary; writes nothing.
+python src/converter/scripts/RLDS.py --dataset-root <DATASET_DIR> --inspect-only
+
+# Convert.
+python src/converter/scripts/RLDS.py \
   --dataset-root <DATASET_DIR> \
   --output-dir <RLDS_DIR> \
-  --language-instruction "<TASK_INSTRUCTION>"
+  --language-instruction "<TASK_INSTRUCTION>" \
+  --overwrite
 ```
+
+The dataset is written to `<RLDS_DIR>/ur_robot_rlds/1.0.0` and loads with
+`tfds.builder_from_directory`.
 
 ### Deploy a policy
 

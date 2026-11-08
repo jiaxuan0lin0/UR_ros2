@@ -1,87 +1,52 @@
-# Policy Adapter 说明
+# Policy adapters
 
-本目录保存具体 policy/model 的接入说明。`policy_client` 主 README 只描述机器人侧通用链路；任何模型仓库路径、云端启动命令、payload 差异、tokenizer/视觉输入约定、RTC server 能力均应写入本目录。
+An adapter connects `policy_client` to one model server. The robot side always uses the 7-D convention described in the [policy_client README](../README.md). The adapter turns that into the server's HTTP payload and turns the reply back into 7-D actions. Server repos, start commands, payload details and model-side features belong in the per-adapter docs in this directory.
 
-## 1. Adapter 职责
+For workspace setup and build, see the [top-level README](../../../README.md).
 
-Adapter 位于 Python 模块路径 `policy_client.scripts.<name>`。启动参数 `policy_script:=<name>` 会导入该模块，并调用：
+## How adapters are loaded
 
-```python
-create_policy_client(
-    base_url: str,
-    timeout_sec: float,
-    gripper_pad_value: float,
-)
-```
+- `policy_script:=<name>` imports `policy_client.scripts.<name>`. A name containing a dot is imported as given, so any module on the node's Python path works.
+- The module must define `create_policy_client(...)`. The node calls it with exactly three keyword arguments: `base_url` (`policy_base_url`), `timeout_sec` (`policy_timeout_sec`) and `gripper_pad_value`. Accept `**kwargs` for forward compatibility.
+- The factory returns a subclass of `policy_client.http_policy.PolicyClient`:
 
-返回对象必须实现 `policy_client.http_policy.PolicyClient` 接口：
-
-| 方法 | 作用 |
+| Method | When the node calls it |
 | --- | --- |
-| `health()` | 检查 policy endpoint 状态 |
-| `reset()` | 重置 policy server 的 episode/history |
-| `act(...)` | 输入图像、proprio、语言指令和历史，返回 `PolicyResult` |
-| `record_action(actions)` | 可选记录已经执行的动作历史 |
+| `health() -> dict` | Once, on the first `start` or `step` (the result is logged) |
+| `reset() -> dict` | On `start` and `step` (`reset_policy_on_start`, default `true`) and on `/policy_control/reset_policy` |
+| `act(*, instruction, observation, reset=False, last_action=None, executed_actions=None, history_images=None) -> PolicyResult` | Every step. The node passes only `instruction`, `observation`, `executed_actions` and `history_images` |
+| `record_action(actions) -> dict` | Never. It is abstract, so it must exist, but the node does not call it |
 
-## 2. 通用 HTTP contract
+`act()` can run on a background thread (async prefetch), but the node never runs two calls at once.
 
-### `/health`
+## What `act()` receives
 
-```bash
-curl http://<HOST>:<PORT>/health
-```
-
-返回 JSON object。字段由具体模型自定。
-
-### `/reset`
-
-```bash
-curl -X POST http://<HOST>:<PORT>/reset
-```
-
-返回 JSON object。用于清空服务端历史状态。
-
-### `/act`
-
-请求由 adapter 构造。机器人侧通用输入为：
-
-| 字段 | 语义 |
+| Argument | Content |
 | --- | --- |
-| `instruction` | 语言任务 |
-| `observation.primary_image` | 主相机图像 |
-| `observation.wrist_image` | 腕部相机图像，可选 |
-| `observation.proprio` | 7D `[q1..q6, gripper]` |
-| `executed_actions` | 已执行动作历史，可选 |
-| `history_images` | 执行期间采集的历史图像，可选 |
+| `instruction` | The `instruction` launch argument |
+| `observation.primary_image` | RGB `uint8` array `(H, W, 3)`, 640x480 by default |
+| `observation.wrist_image` | Same format, or `None` when `require_wrist_image:=false` |
+| `observation.proprio` | 7-D `[q1..q6, gripper]` (rad, gripper normalized 0–1) |
+| `observation.robot_state` | `joint_positions`, `tcp_pose`, `gripper_raw`, `gripper_position` (+ `gripper_source` when the DH reading is used) |
+| `executed_actions` | `None`, or a list of 7-D `[q, gripper]` **measured states** sampled during the previous chunk |
+| `history_images` | `None`, or up to `max_pending_history_frames` primary RGB images from the previous chunk |
 
-响应必须能被解析为：
+`observation.validate()` checks the image shapes and the 7-D proprio.
 
-```json
-{
-  "action": [0, 0, 0, 0, 0, 0, 0],
-  "action_chunk": [
-    [0, 0, 0, 0, 0, 0, 0]
-  ],
-  "history": {}
-}
-```
+## What `act()` must return
 
-`action` 和 `action_chunk` 均为机器人侧 7D convention。具体模型输出不是该 convention 时，转换必须在 adapter 内完成。
+Return `PolicyResult.from_response(response_dict)`. The dict needs `action` (7 finite floats). It may contain `action_chunk` (N x 7, used when present) and `history` (object). Both must already be in the robot's 7-D convention: absolute joint targets plus gripper. Any conversion from the model's own format happens in the adapter.
 
-## 3. 新 adapter 创建步骤
+`policy_client.http_policy.JsonHttpTransport(base_url, timeout_sec)` covers the plumbing. It provides `health()` (`GET /health`), `reset()` (`POST /reset`), `get_json(path)` and `post_json(path, payload)`. It adds `http://` when the scheme is missing, ignores proxy environment variables, and raises on non-2xx or non-JSON replies.
 
-### 通用文件
+## Adding an adapter
 
-```text
-src/policy_client/policy_client/scripts/<adapter_name>.py
-src/policy_client/adapters/<adapter_name>.md
-```
-
-### 通用实现骨架
+1. Create `src/policy_client/policy_client/scripts/<adapter_name>.py` and `src/policy_client/adapters/<adapter_name>.md`.
+2. Implement the client. Minimal skeleton (images must be encoded the way your server expects):
 
 ```python
 from policy_client.http_policy import JsonHttpTransport, PolicyClient
-from policy_client.types import PolicyObservation, PolicyResult
+from policy_client.types import PolicyResult
 
 
 class MyPolicyClient(PolicyClient):
@@ -97,41 +62,35 @@ class MyPolicyClient(PolicyClient):
     def act(self, *, instruction, observation, **kwargs):
         observation.validate()
         payload = {
-            "instruction": instruction,
-            "state": observation.proprio.tolist(),
+            'instruction': instruction,
+            'state': observation.proprio.tolist(),
+            # 'image': <encode observation.primary_image for your server>,
         }
-        response = self.transport.post_json("/act", payload)
-        return PolicyResult.from_response(response)
+        return PolicyResult.from_response(self.transport.post_json('/act', payload))
 
     def record_action(self, actions):
-        return self.transport.post_json("/record_action", {"actions": actions})
+        return self.transport.post_json('/record_action', {'actions': actions})
 
 
 def create_policy_client(*, base_url, timeout_sec=30.0, **_kwargs):
     return MyPolicyClient(base_url, timeout_sec=timeout_sec)
 ```
 
-### 通用启动
+3. Rebuild `policy_client` (see the [top-level README](../../../README.md)) and launch with `dry_run:=true` first:
 
 ```bash
 ros2 launch policy_client policy_joint_abs_control.launch.py \
-  policy_base_url:=http://127.0.0.1:8777 \
+  python_executable:=<PYTHON_EXECUTABLE> \
+  robot_ip:=<ROBOT_IP> \
+  policy_base_url:=http://<POLICY_HOST>:<POLICY_PORT> \
   policy_script:=<adapter_name> \
-  instruction:="<TASK>"
+  instruction:="<TASK_INSTRUCTION>" \
+  dry_run:=true
 ```
 
-### 示例
+## Registered adapters
 
-```bash
-ros2 launch policy_client policy_joint_abs_control.launch.py \
-  policy_base_url:=http://127.0.0.1:8777 \
-  policy_script:=my_policy_adapter \
-  instruction:="perform the demonstrated manipulation task"
-```
-
-## 4. 已登记 adapter 文档
-
-| Adapter | 文档 | Python 模块 |
-| --- | --- | --- |
-| HiF-VLA | [hif_vla.md](hif_vla.md) | `policy_client.scripts.hif_vla` |
-| PI0.5 | [pi05.md](pi05.md) | 待 endpoint contract 确认后实现 |
+| Adapter | Doc | Module | Status |
+| --- | --- | --- | --- |
+| HiF-VLA | [hif_vla.md](hif_vla.md) | `policy_client.scripts.hif_vla` | Implemented |
+| PI0.5 | [pi05.md](pi05.md) | none | Design notes only; no module yet |
