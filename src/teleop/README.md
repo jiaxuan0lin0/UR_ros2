@@ -11,6 +11,10 @@ Pipeline: **teleop** → recorder → converter → policy_client.
 This directory is not a colcon package: run the scripts with `python3` from the workspace root. Building
 and sourcing the workspace are covered in the [top-level README](../../README.md).
 
+`teleop.py` is the entry point and holds the control loop. Command-line parsing, replay, return home, DLS
+vector math and real-time tuning live in `cli.py`, `replay.py`, `return_home.py`, `motion_math.py` and
+`runtime.py`.
+
 ## How it works
 
 ```text
