@@ -291,8 +291,10 @@ The XR stream is much slower than the 500 Hz control loop; teleop reuses the lat
 - `--unsafe-disable-teleop-safety-limits` bypasses smoothing, workspace clamp, step and lag limits, TCP
   speed caps, DLS deadbands, and joint velocity and acceleration limits. The stop button, UR controller
   protections, and the DLS singularity hard stop stay active.
-- After an XR timeout or invalid pose, the grip must be engaged again. The timeout is not applied while
-  the SDK timestamp is 0 (client connected but not tracking).
+- After an XR timeout or invalid pose, teleop holds the arm and re-engages on its own as soon as fresh XR
+  data arrives while the grip is still held. Release the grip if that is not wanted. A failed timestamp read
+  counts as stale data. The timeout is not applied while the SDK timestamp is 0 (client connected but not
+  tracking).
 - Replay starts by driving from home to the episode's first pose at up to `--max-joint-speed`. Clear the
   path before pressing the replay button.
 - `register_bridge` writes RTDE input integer registers 42–46 (or 18–22); keep other programs off them.

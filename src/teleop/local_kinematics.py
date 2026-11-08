@@ -40,8 +40,8 @@ class LocalURKinematics:
             import xacro
         except ImportError as exc:
             raise RuntimeError(
-                "speed_j_dls requires pinocchio and xacro. Run teleop in the XRobo "
-                "environment and source ROS before starting."
+                "speed_j_dls requires pinocchio and xacro. Run teleop in the Python "
+                "environment that provides them and source ROS before starting."
             ) from exc
 
         self._pin = pin

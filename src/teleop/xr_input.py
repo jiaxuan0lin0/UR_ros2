@@ -1,6 +1,3 @@
-import time
-
-
 class XrInput:
     def __init__(self):
         try:
@@ -13,6 +10,7 @@ class XrInput:
 
         self._xrt = xrt
         self._xrt.init()
+        self._last_timestamp_sec = 0.0
 
     def get_pose(self, name: str):
         if name == "left_controller":
@@ -55,9 +53,12 @@ class XrInput:
 
     def timestamp_sec(self) -> float:
         try:
-            return float(self._xrt.get_time_stamp_ns()) * 1.0e-9
+            self._last_timestamp_sec = float(self._xrt.get_time_stamp_ns()) * 1.0e-9
         except Exception:
-            return time.monotonic()
+            # Repeat the last good timestamp so a failing read ages out and
+            # trips the XR timeout instead of looking like fresh data.
+            pass
+        return self._last_timestamp_sec
 
     def close(self):
         self._xrt.close()
