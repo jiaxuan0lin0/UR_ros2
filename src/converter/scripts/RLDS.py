@@ -29,13 +29,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--dataset-root",
         type=Path,
-        default=Path("/home/ustc/UR/dataset"),
+        default=Path.home() / "UR" / "dataset",
         help="Directory containing recorder episode_* folders.",
     )
     parser.add_argument(
         "--output-dir",
         type=Path,
-        default=Path("/home/ustc/UR/rlds_dataset"),
+        default=Path.home() / "UR" / "rlds_dataset",
         help="TFDS data directory to write the converted dataset into.",
     )
     parser.add_argument(

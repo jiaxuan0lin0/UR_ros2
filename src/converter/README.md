@@ -30,7 +30,7 @@ python -m pip install tensorflow tensorflow-datasets
 
 ## Quick start
 
-Always pass `--dataset-root` and `--output-dir`. The defaults in the script are hard-coded to a developer's home directory.
+`--dataset-root` and `--output-dir` default to `~/UR/dataset` and `~/UR/rlds_dataset`; pass them explicitly for any other location.
 
 ```bash
 cd <UR_WORKSPACE>
@@ -71,8 +71,8 @@ PY
 
 | Flag | Default | Description |
 | --- | --- | --- |
-| `--dataset-root` | hard-coded developer path | Folder that directly contains the `episode_*` folders. |
-| `--output-dir` | hard-coded developer path | TFDS `data_dir`. The dataset is written to `<output-dir>/ur_robot_rlds/1.0.0/`. |
+| `--dataset-root` | `~/UR/dataset` | Folder that directly contains the `episode_*` folders. |
+| `--output-dir` | `~/UR/rlds_dataset` | TFDS `data_dir`. The dataset is written to `<output-dir>/ur_robot_rlds/1.0.0/`. |
 | `--state-file` | `robot_states.json` | Name of the JSON file inside each episode. |
 | `--max-episodes N` | all | Use only the first N episodes, in name order. |
 | `--language-instruction` | `""` | One string, stored on every step of every episode. |
@@ -153,7 +153,7 @@ This is done separately for `observation.tcp_pose[3:]` and `action.tcp_pose[3:]`
 | --- | --- |
 | `RLDS conversion needs TensorFlow and TensorFlow Datasets` / `No module named 'tensorflow'` | Activate `<CONVERTER_VENV>`, or install the packages listed under [Setup](#setup). |
 | pip reports ROS dependency conflicts | ROS is sourced in this shell. Open a fresh shell and activate only the venv. |
-| `Dataset root does not exist` | The hard-coded default was used. Pass `--dataset-root`. |
+| `Dataset root does not exist` | The default `~/UR/dataset` was used. Pass `--dataset-root`. |
 | `No episode_* directories found` | `--dataset-root` must be the folder that directly contains the episodes. |
 | `Missing state file` | The episode folder is left over from a recorder that was killed before save. Move it out of the dataset root. |
 | `Missing image: …` | A camera dropped a frame. Move that episode out, or convert with `--no-images`. |

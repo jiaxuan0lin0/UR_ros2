@@ -1,3 +1,5 @@
+import os
+
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, ExecuteProcess
 from launch.substitutions import (
@@ -28,7 +30,7 @@ def generate_launch_description():
         DeclareLaunchArgument(
             "dataset_root",
             default_value=PathJoinSubstitution([
-                EnvironmentVariable("UR_WORKSPACE", default_value="/data/jiaxuanLin/UR"),
+                EnvironmentVariable("UR_WORKSPACE", default_value=os.path.expanduser("~/UR")),
                 "dataset",
             ]),
         ),

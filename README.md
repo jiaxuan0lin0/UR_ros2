@@ -53,14 +53,14 @@ flowchart LR
 | Component | Python packages |
 | --- | --- |
 | `teleop` | `ur_rtde`, `xrobotoolkit_sdk`, `pinocchio`, `xacro`, `pyserial`, `numpy`; `ruckig` (optional target smoothing) |
-| `recorder` | `ur_rtde`, `pyrealsense2`, `opencv-python`, `numpy` |
+| `recorder` | `pyrealsense2`, `opencv-python`, `numpy`; `ur_rtde` (only with `use_rtde_reader:=true`) |
 | `converter` | `tensorflow`, `tensorflow-datasets` (in a separate virtual environment, without ROS sourced) |
 | `policy_client` | `ur_rtde`, `pyrealsense2`, `requests`, `pyserial`, `numpy` |
 | `controllers` | `pyserial` |
 
 `teleop` is usually run from a separate Python environment that provides `xrobotoolkit_sdk`.
 `recorder` runs under the active virtual environment, or the interpreter passed as its
-`python_executable` launch argument; it imports `ur_rtde` even when it does not open its own RTDE connection.
+`python_executable` launch argument.
 
 ## Build
 
@@ -94,7 +94,7 @@ python3 /opt/ros/jazzy/lib/ur_client_library/tool_communication.py <ROBOT_IP> --
 python3 src/teleop/teleop.py --robot-ip <ROBOT_IP> --ur-type ur7e \
   --control-mode speed_j_dls --enable-recorder-control
 
-# 5. Start the recorder (in the Python environment that provides pyrealsense2 and ur_rtde).
+# 5. Start the recorder (in the Python environment that provides pyrealsense2).
 ros2 launch recorder record.launch.py dataset_root:=<DATASET_DIR>
 ```
 

@@ -19,7 +19,7 @@ The recorder never commands the arm or the gripper. Workspace setup and build ar
 
 1. Start teleop with a state file and recorder control enabled. The full command is in the [teleop README](../teleop/README.md). The relevant flags are `--state-file /tmp/ur_teleop_state.json --state-hz 30 --gripper-read-hz 30 --enable-recorder-control`.
 
-2. Launch the recorder. Use a shell where the workspace is sourced and the Python environment with `pyrealsense2` and `ur-rtde` is active:
+2. Launch the recorder. Use a shell where the workspace is sourced and the Python environment with `pyrealsense2` is active (`ur-rtde` is only needed with `use_rtde_reader:=true`):
 
 ```bash
 ros2 launch recorder record.launch.py \
@@ -53,7 +53,7 @@ Launch arguments for `record.launch.py`. All of them except `python_executable` 
 
 | Name | Default | Description |
 | --- | --- | --- |
-| `dataset_root` | `$UR_WORKSPACE/dataset` | Where episode folders are created. If `UR_WORKSPACE` is unset, the launch file falls back to a hard-coded developer path, so set `UR_WORKSPACE` or pass this argument. |
+| `dataset_root` | `$UR_WORKSPACE/dataset` | Where episode folders are created. If `UR_WORKSPACE` is unset, the launch file uses `~/UR/dataset`. |
 | `record_hz` | `30.0` | Sample rate. Must be > 0 and ≤ `color_fps`: the node refuses to start, and `ros2 param set` is rejected, otherwise. Can be changed at runtime. |
 | `color_width` | `640` | RealSense color width (px). |
 | `color_height` | `480` | RealSense color height (px). |
@@ -65,7 +65,7 @@ Launch arguments for `record.launch.py`. All of them except `python_executable` 
 | `rtde_frequency` | `-1.0` | RTDE receive frequency. `-1.0` uses the library default. A warning is logged if it is > 0 and below `record_hz`. |
 | `diagnostics_sec` | `2.0` | Interval for the "Recorder timing max" log line. `0` disables it. |
 | `sample_warning_sec` | `0.04` | Logs "Recorder slow sample" when one sample takes longer than this. `0` disables it. |
-| `python_executable` | `$VIRTUAL_ENV/bin/python3`, or `/usr/bin/python3` if no virtualenv is active | Interpreter used to run `python -m recorder.record`. It must be able to import `pyrealsense2`, `rtde_receive`, `cv2` and `numpy`. |
+| `python_executable` | `$VIRTUAL_ENV/bin/python3`, or `/usr/bin/python3` if no virtualenv is active | Interpreter used to run `python -m recorder.record`. It must be able to import `pyrealsense2`, `cv2` and `numpy`, plus `rtde_receive` when `use_rtde_reader:=true`. |
 
 Rate rules: `record_hz` ≤ `color_fps`. Teleop `--state-hz` and `--gripper-read-hz` should be ≥ `record_hz`, otherwise consecutive samples repeat the same values.
 
@@ -158,10 +158,10 @@ Shutting down the recorder (Ctrl-C) **discards** any episode that has not been s
 | `Skipping malformed recorder sample.` | No gripper reading. Teleop runs with `--disable-gripper`, or the gripper has not reported yet, and `use_rtde_reader:=false`. |
 | Node exits: `record_hz=… cannot exceed color_fps=…` | Lower `record_hz` or raise `color_fps`. |
 | `No RealSense cameras detected` / camera start fails | Check the USB connection and close any other process using the camera, such as `realsense-viewer`. The recorder opens every detected device. |
-| `ModuleNotFoundError: rtde_receive` / `pyrealsense2` | `python_executable` points at an interpreter without these packages. Activate the environment before launching, or pass `python_executable:=…`. `rtde_receive` is imported even when `use_rtde_reader:=false`. |
+| `ModuleNotFoundError: rtde_receive` / `pyrealsense2` | `python_executable` points at an interpreter without these packages. Activate the environment before launching, or pass `python_executable:=…`. `rtde_receive` is only imported with `use_rtde_reader:=true`. |
 | Save replies `No samples recorded; discarded empty episode` | Every tick was skipped. See the rows above. |
 | Start replies `Current episode is stopped. Save or discard it first.` | Call save or discard. |
-| Episodes saved in an unexpected directory | `UR_WORKSPACE` is unset, so the launch file used its fallback. Pass `dataset_root:=`. |
+| Episodes saved in an unexpected directory | `UR_WORKSPACE` is unset, so the launch file used `~/UR/dataset`. Set `UR_WORKSPACE` or pass `dataset_root:=`. |
 | Episode folder without `robot_states.json` | The recorder was killed before save. Delete the folder, because the converter rejects it. |
 | No `return_home` frames at the end | Check the status counts with `RLDS.py --inspect-only`, and check teleop `--return-home-stop-grace-sec`. |
 | Frequent `Recorder slow sample` warnings | Usually the camera wait. Lower `record_hz` or the resolution, and make sure the cameras are on USB 3. |

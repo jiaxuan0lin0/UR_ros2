@@ -1,6 +1,5 @@
 """RTDE reader for UR arm joints and gripper state."""
 
-from rtde_receive import RTDEReceiveInterface
 from recorder.config import UR_IP, GRIPPER_OUTPUT_REGISTER, DEFAULT_RTDE_FREQUENCY
 from recorder.gripper_bridge import raw_to_norm
 
@@ -11,6 +10,9 @@ class RTDEReader:
         self.frequency = frequency
 
     def connect(self):
+        # Imported here so the recorder runs without ur_rtde when use_rtde_reader is false.
+        from rtde_receive import RTDEReceiveInterface
+
         self.rtde_r = RTDEReceiveInterface(self.robot_ip, frequency=self.frequency)
 
     def disconnect(self):
